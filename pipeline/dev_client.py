@@ -6,6 +6,15 @@ from types import SimpleNamespace
 import anthropic
 
 
+def _strip_fences(text: str) -> str:
+    """Remove markdown code fences that the claude CLI adds around JSON responses."""
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]  # drop opening ```[lang] line
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+    return text.strip()
+
+
 def _run_claude(prompt: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["claude", "-p"],
@@ -33,7 +42,7 @@ class _Messages:
             raise RuntimeError(
                 f"claude CLI exited with code {result.returncode}: {result.stderr.strip()}"
             )
-        text = result.stdout.strip()
+        text = _strip_fences(result.stdout.strip())
         if not text:
             raise RuntimeError("claude CLI returned empty output")
 

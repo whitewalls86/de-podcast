@@ -49,6 +49,17 @@ async def test_dev_client_returns_stdout_as_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dev_client_strips_markdown_fences():
+    client = DevClient()
+    fenced = "```json\n[1, 2, 3]\n```"
+    with patch("subprocess.run", return_value=make_completed_process(stdout=fenced)):
+        response = await client.messages.create(
+            model="m", max_tokens=100, messages=[{"role": "user", "content": "x"}]
+        )
+    assert response.content[0].text == "[1, 2, 3]"
+
+
+@pytest.mark.asyncio
 async def test_dev_client_nonzero_exit_raises(monkeypatch):
     client = DevClient()
     with patch(
