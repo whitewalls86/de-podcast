@@ -341,7 +341,7 @@ de-podcast/
 │   ├── discovery.py
 │   ├── ranking.py
 │   ├── clustering.py
-│   ├── dev_client.py             # planned: subprocess-backed Claude client for local dev
+│   ├── dev_client.py             # subprocess-backed Claude client for local dev
 │   ├── notebooklm_gen.py
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
@@ -357,7 +357,7 @@ de-podcast/
 │   └── main.py                   # FastAPI feed server
 │
 ├── scripts/
-│   └── test_pipeline.py          # planned: manual end-to-end smoke test (uses dev client)
+│   └── test_pipeline.py          # manual end-to-end smoke test (uses dev client)
 │
 └── tests/
     ├── test_discovery.py
@@ -454,11 +454,11 @@ During early development, before loading Anthropic API credits, `ranking.py` and
 
 `DevClient` implements only the SDK surface this project needs: `client.messages.create(...)` returning an object with `.content[0].text`. Instead of making an API call, it invokes the Claude CLI locally via `asyncio.to_thread`, captures stdout, and wraps it in that minimal response shape so `ranking.py` and `clustering.py` see no difference.
 
-The prompt is passed via stdin to avoid Windows `CreateProcess` command-line length limits (ranking payloads can be large):
+The prompt is passed via stdin to avoid Windows `CreateProcess` command-line length limits (ranking payloads can be large). `--output-format json` wraps the response in a structured envelope, which also yields token usage stats:
 
 ```python
 subprocess.run(
-    ["claude", "-p"],
+    ["claude", "-p", "--output-format", "json"],
     input=prompt,
     shell=False,
     capture_output=True,
@@ -466,6 +466,14 @@ subprocess.run(
     timeout=120,
 )
 ```
+
+The JSON envelope has the shape `{"result": "...", "usage": {"input_tokens": N, "output_tokens": N, "cache_read_input_tokens": N, "total_cost_usd": 0.0}}`. `total_cost_usd` is always `0.0` in dev mode because the CLI routes through the Claude.ai subscription rather than the API, so `_log_usage()` computes an estimated API cost from the token counts using actual `claude-haiku-4-5` pricing ($1.00/M input, $5.00/M output, $0.10/M cache read). Each invocation prints a line like:
+
+```
+[dev-client] tokens: input=1842, output=312, est. $0.0034
+```
+
+This lets you track cumulative cost exposure before switching to paid API credits.
 
 Raises clear errors when `claude` is not installed, exits nonzero, times out, or returns empty output.
 
@@ -476,10 +484,10 @@ USE_DEV_CLIENT unset →  anthropic.AsyncAnthropic (Anthropic API → API credit
 
 **Known limitations of dev mode:**
 
-- `claude -p` can add conversational framing around JSON; the existing response-shape validation in `rank()`/`cluster()` will catch and surface this as a clear error.
 - Subject to Claude.ai rate limits — not suitable for high-volume runs.
 - Not available inside Docker containers (no `claude` CLI installed there); dev mode is local only.
 - This avoids API billing during development, but it still uses model capacity through the logged-in Claude CLI account.
+- Estimated costs are based on `claude-haiku-4-5` API rates; actual production costs depend on the model and tier in use.
 
 **Smoke test script (`scripts/test_pipeline.py`):**
 

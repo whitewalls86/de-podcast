@@ -56,7 +56,7 @@ async def test_dev_client_returns_result_text(monkeypatch):
 @pytest.mark.asyncio
 async def test_dev_client_logs_usage(capsys):
     client = DevClient()
-    usage = {"input_tokens": 100, "output_tokens": 50, "total_cost_usd": 0.0012}
+    usage = {"input_tokens": 100, "output_tokens": 50}
     stdout = make_envelope("hello", usage=usage)
     with patch("subprocess.run", return_value=make_completed_process(stdout=stdout)):
         await client.messages.create(
@@ -65,7 +65,8 @@ async def test_dev_client_logs_usage(capsys):
     out = capsys.readouterr().out
     assert "input=100" in out
     assert "output=50" in out
-    assert "cost=$0.0012" in out
+    expected_cost = (100 * 1.00 + 50 * 5.00) / 1_000_000
+    assert f"est. ${expected_cost:.4f}" in out
 
 
 @pytest.mark.asyncio

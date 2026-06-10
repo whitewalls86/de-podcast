@@ -18,17 +18,28 @@ def _run_claude(prompt: str) -> subprocess.CompletedProcess:
     )
 
 
+# claude-haiku-4-5 API pricing (USD per million tokens)
+_INPUT_COST_PER_M = 1.00
+_OUTPUT_COST_PER_M = 5.00
+_CACHE_READ_COST_PER_M = 0.10
+
+
 def _log_usage(usage: dict) -> None:
-    parts = [
-        f"input={usage.get('input_tokens', '?')}",
-        f"output={usage.get('output_tokens', '?')}",
-    ]
-    cache_read = usage.get("cache_read_input_tokens", 0)
+    input_tokens = usage.get("input_tokens", 0) or 0
+    output_tokens = usage.get("output_tokens", 0) or 0
+    cache_read = usage.get("cache_read_input_tokens", 0) or 0
+
+    parts = [f"input={input_tokens}", f"output={output_tokens}"]
     if cache_read:
         parts.append(f"cache_read={cache_read}")
-    cost = usage.get("total_cost_usd")
-    if cost is not None:
-        parts.append(f"cost=${cost:.4f}")
+
+    est_cost = (
+        input_tokens * _INPUT_COST_PER_M
+        + output_tokens * _OUTPUT_COST_PER_M
+        + cache_read * _CACHE_READ_COST_PER_M
+    ) / 1_000_000
+    parts.append(f"est. ${est_cost:.4f}")
+
     print(f"[dev-client] tokens: {', '.join(parts)}", flush=True)
 
 
