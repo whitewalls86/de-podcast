@@ -22,7 +22,11 @@ notebooklm_auth/
 # Local scripts
 scripts/
 
+# Graphify local outputs
+graphify-out/
+
 # IDE
+.claude/
 .idea/
 .vscode/
 *.iml
