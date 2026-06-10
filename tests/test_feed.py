@@ -128,6 +128,39 @@ def test_get_episode_content_type():
     assert r.headers["content-type"] == "audio/mpeg"
 
 
+# --- file type validation ---
+
+
+def test_non_mp3_filename_rejected():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "T", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": ("notes.txt", io.BytesIO(b"hello"), "text/plain")},
+    )
+    assert r.status_code == 415
+
+
+def test_wrong_content_type_rejected():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "T", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": ("ep.mp3", io.BytesIO(b"x"), "application/octet-stream")},
+    )
+    assert r.status_code == 415
+
+
+def test_rejected_upload_does_not_write_file():
+    client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "T", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": ("notes.txt", io.BytesIO(b"hello"), "text/plain")},
+    )
+    assert not (feed_module.EPISODES_DIR / "notes.txt").exists()
+
+
 # --- pub_date validation ---
 
 
@@ -188,10 +221,10 @@ def test_nested_path_traversal_sanitized_to_basename():
         "/episodes",
         headers=AUTH,
         data={"title": "Evil", "pub_date": "2026-06-10T06:00:00"},
-        files={"file": ("../../etc/passwd", io.BytesIO(b"x"), "audio/mpeg")},
+        files={"file": ("../../etc/evil.mp3", io.BytesIO(b"x"), "audio/mpeg")},
     )
     assert r.status_code == 200
-    assert (feed_module.EPISODES_DIR / "passwd").exists()
+    assert (feed_module.EPISODES_DIR / "evil.mp3").exists()
 
 
 # --- duplicate filenames ---

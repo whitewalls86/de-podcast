@@ -108,6 +108,8 @@ def add_episode(
         pub_dt = pub_dt.replace(tzinfo=UTC)
 
     filename = safe_filename(file.filename)
+    if not filename.lower().endswith(".mp3") or file.content_type != "audio/mpeg":
+        raise HTTPException(status_code=415, detail="Only audio/mpeg (.mp3) uploads are accepted")
     dest = _dest_safe(filename)
 
     with dest.open("wb") as f:
