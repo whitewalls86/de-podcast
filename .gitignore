@@ -1,0 +1,29 @@
+# Environment
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Episodes (local audio files)
+pipeline/episodes/
+feed/episodes/
+*.mp3
+
+# NotebookLM auth
+notebooklm_auth/
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
