@@ -34,9 +34,9 @@ def mock_client(text: str):
 async def test_score_merge_by_url(monkeypatch):
     articles = make_articles(3)
     scores = [
-        {"url": articles[0]["url"], "score": 0.9, "reason": "great"},
-        {"url": articles[1]["url"], "score": 0.7, "reason": "good"},
-        {"url": articles[2]["url"], "score": 0.3, "reason": "meh"},
+        {"url": articles[0]["url"], "score": 0.9, "topic_tags": ["dbt"], "reason": "great"},
+        {"url": articles[1]["url"], "score": 0.7, "topic_tags": ["kafka"], "reason": "good"},
+        {"url": articles[2]["url"], "score": 0.3, "topic_tags": [], "reason": "meh"},
     ]
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
@@ -49,6 +49,33 @@ async def test_score_merge_by_url(monkeypatch):
     assert articles[2]["url"] not in urls
     assert result[0]["score"] == 0.9
     assert result[0]["reason"] == "great"
+    assert result[0]["topic_tags"] == ["dbt"]
+
+
+async def test_topic_tags_preserved(monkeypatch):
+    articles = make_articles(2)
+    scores = [
+        {"url": articles[0]["url"], "score": 0.8, "topic_tags": ["spark", "delta"], "reason": "x"},
+        {"url": articles[1]["url"], "score": 0.6, "topic_tags": [], "reason": "y"},
+    ]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        result = await rank(articles)
+    assert result[0]["topic_tags"] == ["spark", "delta"]
+    assert result[1]["topic_tags"] == []
+
+
+async def test_topic_tags_defaults_to_empty_list_when_absent(monkeypatch):
+    articles = make_articles(1)
+    scores = [{"url": articles[0]["url"], "score": 0.8, "reason": "no tags field"}]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        result = await rank(articles)
+    assert result[0]["topic_tags"] == []
 
 
 async def test_score_filtering_drops_below_threshold(monkeypatch):

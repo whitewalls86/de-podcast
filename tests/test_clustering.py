@@ -80,3 +80,67 @@ async def test_invalid_json_raises(monkeypatch):
     ):
         with pytest.raises(ValueError, match="invalid JSON"):
             await cluster(articles)
+
+
+async def test_missing_url_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2", "http://example.com/3"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": [urls[0]]},
+        "batch_b": {"title": "B", "urls": [urls[1]]},  # urls[2] omitted
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="mismatch"):
+            await cluster(articles)
+
+
+async def test_duplicate_url_across_batches_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": urls},
+        "batch_b": {"title": "B", "urls": [urls[0]]},  # urls[0] duplicated
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="duplicated"):
+            await cluster(articles)
+
+
+async def test_wrong_batch_keys_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": [urls[0]]},
+        "batch_c": {"title": "C", "urls": [urls[1]]},  # wrong key
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="batch_a and batch_b"):
+            await cluster(articles)
+
+
+async def test_empty_batch_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": urls},
+        "batch_b": {"title": "B", "urls": []},  # empty
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="empty URL list"):
+            await cluster(articles)

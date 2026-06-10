@@ -14,7 +14,7 @@ You are a data engineering content curator. Score each article from 0.0 to 1.0 b
 - Source credibility
 
 Return ONLY a JSON array, no commentary:
-[{"url": "...", "score": 0.92, "reason": "one sentence"}, ...]
+[{"url": "...", "score": 0.92, "topic_tags": ["dbt", "testing"], "reason": "one sentence"}, ...]
 """
 
 
@@ -45,7 +45,14 @@ async def rank(articles: list[dict]) -> list[dict]:
     for article in articles:
         entry = score_map.get(article["url"])
         if entry and entry.get("score", 0) >= 0.5:
-            ranked.append({**article, "score": entry["score"], "reason": entry.get("reason", "")})
+            ranked.append(
+                {
+                    **article,
+                    "score": entry["score"],
+                    "topic_tags": entry.get("topic_tags", []),
+                    "reason": entry.get("reason", ""),
+                }
+            )
 
     ranked.sort(key=lambda a: a["score"], reverse=True)
     return ranked[:10]

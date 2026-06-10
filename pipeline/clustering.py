@@ -33,6 +33,38 @@ async def cluster(articles: list[dict]) -> dict:
 
     raw = response.content[0].text
     try:
-        return json.loads(raw)
+        result = json.loads(raw)
     except json.JSONDecodeError as e:
         raise ValueError(f"Claude returned invalid JSON from clustering: {e}\nRaw: {raw!r}") from e
+
+    _validate_clusters(result, {a["url"] for a in articles})
+    return result
+
+
+def _validate_clusters(result: dict, input_urls: set[str]) -> None:
+    if set(result.keys()) != {"batch_a", "batch_b"}:
+        raise ValueError(
+            f"Clustering must return exactly batch_a and batch_b, got: {list(result.keys())}"
+        )
+
+    returned: list[str] = []
+    for key in ("batch_a", "batch_b"):
+        batch = result[key]
+        urls = batch.get("urls", [])
+        if not urls:
+            raise ValueError(f"Clustering returned empty URL list for {key}")
+        returned.extend(urls)
+
+    returned_set = set(returned)
+    if len(returned) != len(returned_set):
+        dupes = [u for u in returned if returned.count(u) > 1]
+        raise ValueError(f"Clustering duplicated URLs across batches: {list(set(dupes))}")
+    if returned_set != input_urls:
+        missing = input_urls - returned_set
+        extra = returned_set - input_urls
+        parts = []
+        if missing:
+            parts.append(f"missing {list(missing)}")
+        if extra:
+            parts.append(f"unknown {list(extra)}")
+        raise ValueError(f"Clustering URL mismatch — {'; '.join(parts)}")
