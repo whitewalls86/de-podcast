@@ -49,7 +49,7 @@ async def test_dev_client_returns_result_text(monkeypatch):
     assert response.content[0].text == "some output"
     # Verify stdin invocation, correct flags, and model passthrough
     args, kwargs = mock_run.call_args
-    assert args[0] == _CLI_FLAGS + ["--model", "claude-haiku-4-5-20251001"]
+    assert args[0] == _CLI_FLAGS + ["--model", "claude-haiku-4-5"]
     assert kwargs["input"] == "sys\n\nmsg"
 
 
@@ -57,6 +57,18 @@ async def test_dev_client_returns_result_text(monkeypatch):
 async def test_dev_client_strips_fenced_result():
     client = DevClient()
     fenced = "```json\n[1, 2, 3]\n```"
+    stdout = make_envelope(fenced)
+    with patch("subprocess.run", return_value=make_completed_process(stdout=stdout)):
+        response = await client.messages.create(
+            model="m", max_tokens=100, messages=[{"role": "user", "content": "x"}]
+        )
+    assert response.content[0].text == "[1, 2, 3]"
+
+
+@pytest.mark.asyncio
+async def test_dev_client_strips_fenced_result_with_trailing_newline():
+    client = DevClient()
+    fenced = "```json\n[1, 2, 3]\n```\n"
     stdout = make_envelope(fenced)
     with patch("subprocess.run", return_value=make_completed_process(stdout=stdout)):
         response = await client.messages.create(

@@ -1,13 +1,19 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 from types import SimpleNamespace
 
 import anthropic
 
+# API model IDs include a date suffix (e.g. claude-haiku-4-5-20251001) that the
+# Claude Code CLI doesn't accept — strip it so --model gets claude-haiku-4-5.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
+
 
 def _strip_fences(text: str) -> str:
+    text = text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
         if text.endswith("```"):
@@ -18,7 +24,7 @@ def _strip_fences(text: str) -> str:
 def _run_claude(prompt: str, model: str | None = None) -> subprocess.CompletedProcess:
     cmd = ["claude", "-p", "--output-format", "json"]
     if model:
-        cmd += ["--model", model]
+        cmd += ["--model", _DATE_SUFFIX.sub("", model)]
     return subprocess.run(
         cmd,
         input=prompt,
