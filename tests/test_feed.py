@@ -114,6 +114,46 @@ def test_get_episode_404():
     assert r.status_code == 404
 
 
+# --- path traversal ---
+# Traversal attempts are sanitized to basename — the file is accepted but
+# written safely inside EPISODES_DIR, never at the traversal target.
+
+
+def test_path_traversal_sanitized_to_basename():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "Evil", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": ("../evil.mp3", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert r.status_code == 200
+    assert r.json()["url"].endswith("evil.mp3")
+    assert (feed_module.EPISODES_DIR / "evil.mp3").exists()
+
+
+def test_nested_path_traversal_sanitized_to_basename():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "Evil", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": ("../../etc/passwd", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert r.status_code == 200
+    assert (feed_module.EPISODES_DIR / "passwd").exists()
+
+
+# --- duplicate filenames ---
+
+
+def test_duplicate_filename_replaces_entry():
+    post_episode(filename="today.mp3", data=b"v1", title="Version 1")
+    post_episode(filename="today.mp3", data=b"v2", title="Version 2")
+    episodes = json.loads(feed_module.EPISODES_JSON.read_text())
+    assert len(episodes) == 1
+    assert episodes[0]["title"] == "Version 2"
+    assert feed_module.EPISODES_DIR.joinpath("today.mp3").read_bytes() == b"v2"
+
+
 # --- retention ---
 
 

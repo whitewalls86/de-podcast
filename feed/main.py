@@ -76,6 +76,22 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def safe_filename(raw: str | None) -> str:
+    """Return a sanitized basename, rejecting path separators."""
+    name = Path(raw or "episode.mp3").name
+    if not name or name in (".", ".."):
+        raise HTTPException(status_code=422, detail="Invalid filename")
+    return name
+
+
+def _dest_safe(filename: str) -> Path:
+    """Resolve destination and assert it stays inside EPISODES_DIR."""
+    dest = (EPISODES_DIR / filename).resolve()
+    if not dest.is_relative_to(EPISODES_DIR.resolve()):
+        raise HTTPException(status_code=422, detail="Invalid filename")
+    return dest
+
+
 @app.post("/episodes", dependencies=[Depends(verify_token)])
 def add_episode(
     file: UploadFile = File(...),
@@ -83,33 +99,41 @@ def add_episode(
     description: str = Form(""),
     pub_date: str = Form(...),
 ) -> dict:
-    filename = file.filename
-    dest = EPISODES_DIR / filename
+    filename = safe_filename(file.filename)
+    dest = _dest_safe(filename)
+
     with dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
     size = dest.stat().st_size
     url = f"{FEED_HOST}/episodes/{filename}"
 
+    entry = {
+        "filename": filename,
+        "title": title,
+        "description": description,
+        "pub_date": pub_date,
+        "url": url,
+        "size": size,
+    }
+
     episodes = load_episodes()
-    episodes.append(
-        {
-            "filename": filename,
-            "title": title,
-            "description": description,
-            "pub_date": pub_date,
-            "url": url,
-            "size": size,
-        }
-    )
+    # Replace existing entry for the same filename (same-day rerun), else append.
+    existing = next((i for i, e in enumerate(episodes) if e["filename"] == filename), None)
+    if existing is not None:
+        episodes[existing] = entry
+    else:
+        episodes.append(entry)
 
     if len(episodes) > MAX_EPISODES:
         to_prune = episodes[:-MAX_EPISODES]
         episodes = episodes[-MAX_EPISODES:]
+        retained = {e["filename"] for e in episodes}
         for ep in to_prune:
-            old = EPISODES_DIR / ep["filename"]
-            if old.exists():
-                old.unlink()
+            if ep["filename"] not in retained:
+                old = EPISODES_DIR / ep["filename"]
+                if old.exists():
+                    old.unlink()
 
     save_episodes(episodes)
     regenerate_feed(episodes)
