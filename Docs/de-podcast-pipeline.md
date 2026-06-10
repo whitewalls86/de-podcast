@@ -442,23 +442,24 @@ n8n and the pipeline container are on the same Docker network, so `http://pipeli
 
 ---
 
-## Planned Dev Client (Claude CLI workaround)
+## Dev Client (Claude CLI workaround)
 
-During early development, before loading Anthropic API credits, `ranking.py` and `clustering.py` should be able to run against the Claude.ai subscription via the `claude` CLI instead of the paid API. This is a local development workaround, not the production path.
+During early development, before loading Anthropic API credits, `ranking.py` and `clustering.py` can run against the Claude.ai subscription via the `claude` CLI instead of the paid API. This is a local development workaround, not the production path.
 
-**Toggle:** set `USE_DEV_CLIENT=true` in the local environment. When unset or `false`, the normal `anthropic.AsyncAnthropic` client is used. Do not enable this in Docker or n8n; containers should always use the Anthropic API client.
+**Toggle:** set `USE_DEV_CLIENT=true` in the local environment (`.env.example` includes this key). When unset or `false`, the normal `anthropic.AsyncAnthropic` client is used. Do not enable this in Docker or n8n; containers should always use the Anthropic API client.
 
 **How it works (`pipeline/dev_client.py`):**
 
-Add a small client factory, for example `get_anthropic_client()`, so `ranking.py` and `clustering.py` do not each read `USE_DEV_CLIENT` directly. In normal mode it returns `anthropic.AsyncAnthropic`. In dev mode it returns `DevClient`.
+`get_anthropic_client()` is a factory used by `ranking.py` and `clustering.py`. In normal mode it returns `anthropic.AsyncAnthropic`. In dev mode it returns `DevClient`.
 
-`DevClient` implements only the SDK surface this project needs: `client.messages.create(...)` returning an object with `.content[0].text`. Instead of making an API call, it invokes the Claude CLI locally, captures stdout, and wraps it in that minimal response shape so `ranking.py` and `clustering.py` see no difference.
+`DevClient` implements only the SDK surface this project needs: `client.messages.create(...)` returning an object with `.content[0].text`. Instead of making an API call, it invokes the Claude CLI locally via `asyncio.to_thread`, captures stdout, and wraps it in that minimal response shape so `ranking.py` and `clustering.py` see no difference.
 
-Invoke the CLI without a shell so article text cannot break command parsing:
+The prompt is passed via stdin to avoid Windows `CreateProcess` command-line length limits (ranking payloads can be large):
 
 ```python
 subprocess.run(
-    ["claude", "-p", prompt],
+    ["claude", "-p"],
+    input=prompt,
     shell=False,
     capture_output=True,
     text=True,
@@ -466,7 +467,7 @@ subprocess.run(
 )
 ```
 
-The implementation should raise clear errors when `claude` is not installed, exits nonzero, times out, or returns empty output.
+Raises clear errors when `claude` is not installed, exits nonzero, times out, or returns empty output.
 
 ```
 USE_DEV_CLIENT=true  →  DevClient (subprocess → claude CLI → Claude.ai subscription)
@@ -482,7 +483,7 @@ USE_DEV_CLIENT unset →  anthropic.AsyncAnthropic (Anthropic API → API credit
 
 **Smoke test script (`scripts/test_pipeline.py`):**
 
-Planned manual script that runs `discover()` → `rank()` → `cluster()` end-to-end against live sources and prints the results. It should set or require `USE_DEV_CLIENT=true` by default. Not part of the automated test suite — intended for local validation before committing API credits.
+Runs `discover()` → `rank()` → `cluster()` end-to-end against live sources and prints a summary (article counts, batch titles). Requires `USE_DEV_CLIENT=true` — exits immediately with a clear message otherwise. Not part of the automated test suite; intended for local validation before committing API credits.
 
 ```bash
 USE_DEV_CLIENT=true python scripts/test_pipeline.py

@@ -1,7 +1,6 @@
 import asyncio
 import os
 import subprocess
-from functools import partial
 from types import SimpleNamespace
 
 import anthropic
@@ -9,7 +8,8 @@ import anthropic
 
 def _run_claude(prompt: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["claude", "-p", prompt],
+        ["claude", "-p"],
+        input=prompt,
         shell=False,
         capture_output=True,
         text=True,
@@ -21,7 +21,7 @@ class _Messages:
     async def create(self, *, system: str = "", messages: list[dict], **kwargs) -> object:
         prompt = f"{system}\n\n{messages[0]['content']}" if system else messages[0]["content"]
         try:
-            result = await asyncio.to_thread(partial(_run_claude, prompt))
+            result = await asyncio.to_thread(_run_claude, prompt)
         except FileNotFoundError:
             raise FileNotFoundError(
                 "claude CLI not found — install Claude Code or ensure it is on PATH"
