@@ -128,6 +128,29 @@ def test_get_episode_content_type():
     assert r.headers["content-type"] == "audio/mpeg"
 
 
+# --- pub_date validation ---
+
+
+def test_invalid_pub_date_returns_422():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "T", "pub_date": "not-a-date"},
+        files={"file": ("ep.mp3", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert r.status_code == 422
+
+
+def test_invalid_pub_date_does_not_write_file():
+    client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "T", "pub_date": "not-a-date"},
+        files={"file": ("orphan.mp3", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert not (feed_module.EPISODES_DIR / "orphan.mp3").exists()
+
+
 # --- unsafe filenames ---
 # "." and ".." are rejected (422); traversal paths are stripped to basename.
 

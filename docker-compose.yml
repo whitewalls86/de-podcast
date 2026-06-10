@@ -1,6 +1,7 @@
 services:
 
   pipeline:
+    profiles: [pipeline]
     build: ./pipeline
     ports:
       - "8001:8001"

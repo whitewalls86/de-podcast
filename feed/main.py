@@ -99,6 +99,13 @@ def add_episode(
     description: str = Form(""),
     pub_date: str = Form(...),
 ) -> dict:
+    try:
+        pub_dt = datetime.fromisoformat(pub_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid pub_date — expected ISO 8601")
+    if pub_dt.tzinfo is None:
+        pub_dt = pub_dt.replace(tzinfo=UTC)
+
     filename = safe_filename(file.filename)
     dest = _dest_safe(filename)
 

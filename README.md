@@ -6,7 +6,14 @@ Automated pipeline that discovers interesting data engineering articles, groups 
 
 1. Copy `.env.example` to `.env` and fill in values
 2. Find your LAN IP: `ipconfig` → IPv4 address of your network adapter
-3. `docker compose up -d`
+3. Start the feed and n8n services (pipeline is added in a later build step):
+   ```
+   docker compose up -d
+   ```
+4. Once the pipeline service is built, start the full stack:
+   ```
+   docker compose --profile pipeline up -d
+   ```
 
 ## Services
 
