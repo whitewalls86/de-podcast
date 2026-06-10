@@ -491,13 +491,31 @@ USE_DEV_CLIENT=true python scripts/test_pipeline.py
 
 ---
 
+## Cross-Run Deduplication
+
+Discovery uses a rolling 48-hour window, so an article published at 9am Monday is a candidate on both the Monday and Tuesday runs. Without cross-run state, a high-scoring article can appear in two consecutive podcasts.
+
+**Mechanism:** a `data/seen_urls.json` file (Docker volume, persisted across runs) tracks every URL that made it into a final podcast. At the start of each run, `discover()` filters out any URL already in that file. At the end of a successful run, the pipeline appends the URLs from both batches.
+
+The file is written only on success — if NotebookLM generation fails, URLs are not marked seen, so they remain candidates for the next run rather than being silently dropped.
+
+```
+data/seen_urls.json  →  ["https://...", "https://...", ...]
+```
+
+This lives in the `pipeline/` container under a named volume so it persists across container restarts. The Admin UI can expose a "clear seen URLs" action for manual resets (e.g. after a gap in runs).
+
+**Not implemented yet** — add during pipeline wiring (step 4).
+
+---
+
 ## Build Order
 
 1. **Feed container** — get `feed/` running, verify `feed.xml` is reachable on LAN, add to Overcast
 2. **Discovery** — `discovery.py` pulling and deduping articles from all sources
 3. **Ranking + Clustering** — Claude Haiku calls, validate JSON output quality manually
-4. **Pipeline wiring** — `pipeline.py` end-to-end with mocked NotebookLM (avoid burning quota during dev)
-5. **Admin UI** — dashboard, source management, auth status display
+4. **Pipeline wiring** — `pipeline.py` end-to-end with mocked NotebookLM; includes cross-run deduplication (`seen_urls.json` read + write on success)
+5. **Admin UI** — dashboard, source management, auth status display, "clear seen URLs" action
 6. **NotebookLM gen** — `notebooklm login` first-time auth, test single notebook + audio generation
 7. **noVNC re-auth** — Dockerfile with Xvfb/VNC/noVNC, test full re-auth flow in browser
 8. **n8n workflow** — cron trigger, HTTP call to pipeline, failure notification
