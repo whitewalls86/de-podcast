@@ -6,3 +6,4 @@ ruff
 # service deps needed to run tests locally
 fastapi[standard]==0.115.12
 feedgen==1.0.0
+feedparser==6.0.11

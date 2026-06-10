@@ -1,0 +1,119 @@
+import asyncio
+import calendar
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import feedparser
+import httpx
+from dateutil import parser as dateutil_parser
+
+_HN_PARAMS = {"tags": "story", "query": "data+engineering", "hitsPerPage": "30"}
+_SNIPPET_MAX = 300
+
+
+def _cutoff() -> datetime:
+    return datetime.now(tz=UTC) - timedelta(hours=48)
+
+
+def _to_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _snippet(text: str | None) -> str:
+    if not text:
+        return ""
+    return text[:_SNIPPET_MAX]
+
+
+async def _fetch_rss(source: dict) -> list[dict]:
+    feed = await asyncio.to_thread(feedparser.parse, source["url"])
+    results = []
+    for entry in feed.entries:
+        url = entry.get("link", "")
+        if not url:
+            continue
+        published_parsed = entry.get("published_parsed")
+        if published_parsed:
+            published_at: datetime | None = datetime.fromtimestamp(
+                calendar.timegm(published_parsed), tz=UTC
+            )
+        else:
+            published_at = None
+            for field in ("published", "updated"):
+                raw = entry.get(field)
+                if raw:
+                    try:
+                        published_at = _to_utc(dateutil_parser.parse(raw))
+                        break
+                    except Exception:
+                        pass
+        if published_at is None:
+            continue
+        results.append(
+            {
+                "title": entry.get("title", ""),
+                "url": url,
+                "source": source["name"],
+                "published_at": published_at,
+                "snippet": _snippet(entry.get("summary") or entry.get("description")),
+            }
+        )
+    return results
+
+
+async def _fetch_hn(source: dict) -> list[dict]:
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(source["url"], params=_HN_PARAMS)
+        r.raise_for_status()
+        data = r.json()
+    results = []
+    for hit in data.get("hits", []):
+        url = hit.get("url", "")
+        if not url:
+            continue
+        raw_date = hit.get("created_at")
+        if not raw_date:
+            continue
+        try:
+            published_at = _to_utc(dateutil_parser.parse(raw_date))
+        except Exception:
+            continue
+        results.append(
+            {
+                "title": hit.get("title", ""),
+                "url": url,
+                "source": source["name"],
+                "published_at": published_at,
+                "snippet": _snippet(hit.get("story_text")),
+            }
+        )
+    return results
+
+
+async def discover(sources_path: Path) -> list[dict]:
+    sources = json.loads(sources_path.read_text())
+    active = [s for s in sources if s.get("active", True)]
+
+    tasks = []
+    for source in active:
+        if source["type"] == "rss":
+            tasks.append(_fetch_rss(source))
+        elif source["type"] == "hn":
+            tasks.append(_fetch_hn(source))
+
+    results_per_source = await asyncio.gather(*tasks, return_exceptions=True)
+
+    cutoff = _cutoff()
+    seen: dict[str, dict] = {}
+    for result in results_per_source:
+        if isinstance(result, Exception):
+            continue
+        for article in result:
+            url = article["url"]
+            if url not in seen and article["published_at"] >= cutoff:
+                seen[url] = article
+
+    return list(seen.values())
