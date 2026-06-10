@@ -341,6 +341,7 @@ de-podcast/
 │   ├── discovery.py
 │   ├── ranking.py
 │   ├── clustering.py
+│   ├── dev_client.py             # subprocess-backed Claude client for local dev
 │   ├── notebooklm_gen.py
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
@@ -355,9 +356,13 @@ de-podcast/
 │   ├── requirements.txt
 │   └── main.py                   # FastAPI feed server
 │
+├── scripts/
+│   └── test_pipeline.py          # manual end-to-end smoke test (uses dev client)
+│
 └── tests/
     ├── test_discovery.py
     ├── test_ranking.py
+    ├── test_clustering.py
     └── test_feed.py
 ```
 
@@ -368,6 +373,7 @@ de-podcast/
 ```bash
 # .env  (gitignored)
 ANTHROPIC_API_KEY=sk-ant-...
+USE_DEV_CLIENT=false              # local dev only; use Claude CLI instead of Anthropic API
 FEED_TOKEN=<random-string>
 HOST_LAN_IP=192.168.1.x       # Windows machine's LAN IP
 FEED_TITLE=DE Daily
@@ -378,6 +384,7 @@ N8N_PASSWORD=<password>
 ```bash
 # .env.example  (committed)
 ANTHROPIC_API_KEY=
+USE_DEV_CLIENT=false
 FEED_TOKEN=
 HOST_LAN_IP=
 FEED_TITLE=DE Daily
@@ -435,13 +442,88 @@ n8n and the pipeline container are on the same Docker network, so `http://pipeli
 
 ---
 
+## Dev Client (Claude CLI workaround)
+
+During early development, before loading Anthropic API credits, `ranking.py` and `clustering.py` can run against the Claude.ai subscription via the `claude` CLI instead of the paid API. This is a local development workaround, not the production path.
+
+**Toggle:** set `USE_DEV_CLIENT=true` in the local environment (`.env.example` includes this key). When unset or `false`, the normal `anthropic.AsyncAnthropic` client is used. Do not enable this in Docker or n8n; containers should always use the Anthropic API client.
+
+**How it works (`pipeline/dev_client.py`):**
+
+`get_anthropic_client()` is a factory used by `ranking.py` and `clustering.py`. In normal mode it returns `anthropic.AsyncAnthropic`. In dev mode it returns `DevClient`.
+
+`DevClient` implements only the SDK surface this project needs: `client.messages.create(...)` returning an object with `.content[0].text`. Instead of making an API call, it invokes the Claude CLI locally via `asyncio.to_thread`, captures stdout, and wraps it in that minimal response shape so `ranking.py` and `clustering.py` see no difference.
+
+The prompt is passed via stdin to avoid Windows `CreateProcess` command-line length limits (ranking payloads can be large). `--output-format json` wraps the response in a structured envelope, which also yields token usage stats:
+
+```python
+subprocess.run(
+    ["claude", "-p", "--output-format", "json"],
+    input=prompt,
+    shell=False,
+    capture_output=True,
+    text=True,
+    timeout=120,
+)
+```
+
+The JSON envelope has the shape `{"result": "...", "usage": {"input_tokens": N, "output_tokens": N, "cache_read_input_tokens": N, "total_cost_usd": 0.0}}`. `total_cost_usd` is always `0.0` in dev mode because the CLI routes through the Claude.ai subscription rather than the API, so `_log_usage()` computes an estimated API cost from the token counts using actual `claude-haiku-4-5` pricing ($1.00/M input, $5.00/M output, $0.10/M cache read). Each invocation prints a line like:
+
+```
+[dev-client] tokens: input=1842, output=312, est. $0.0034
+```
+
+This lets you track cumulative cost exposure before switching to paid API credits.
+
+Raises clear errors when `claude` is not installed, exits nonzero, times out, or returns empty output.
+
+```
+USE_DEV_CLIENT=true  →  DevClient (subprocess → claude CLI → Claude.ai subscription)
+USE_DEV_CLIENT unset →  anthropic.AsyncAnthropic (Anthropic API → API credits)
+```
+
+**Known limitations of dev mode:**
+
+- Subject to Claude.ai rate limits — not suitable for high-volume runs.
+- Not available inside Docker containers (no `claude` CLI installed there); dev mode is local only.
+- This avoids API billing during development, but it still uses model capacity through the logged-in Claude CLI account.
+- Estimated costs are based on `claude-haiku-4-5` API rates; actual production costs depend on the model and tier in use.
+
+**Smoke test script (`scripts/test_pipeline.py`):**
+
+Runs `discover()` → `rank()` → `cluster()` end-to-end against live sources and prints a summary (article counts, batch titles). Requires `USE_DEV_CLIENT=true` — exits immediately with a clear message otherwise. Not part of the automated test suite; intended for local validation before committing API credits.
+
+```bash
+USE_DEV_CLIENT=true python scripts/test_pipeline.py
+```
+
+---
+
+## Cross-Run Deduplication
+
+Discovery uses a rolling 48-hour window, so an article published at 9am Monday is a candidate on both the Monday and Tuesday runs. Without cross-run state, a high-scoring article can appear in two consecutive podcasts.
+
+**Mechanism:** a `data/seen_urls.json` file (Docker volume, persisted across runs) tracks every URL that made it into a final podcast. At the start of each run, `discover()` filters out any URL already in that file. At the end of a successful run, the pipeline appends the URLs from both batches.
+
+The file is written only on success — if NotebookLM generation fails, URLs are not marked seen, so they remain candidates for the next run rather than being silently dropped.
+
+```
+data/seen_urls.json  →  ["https://...", "https://...", ...]
+```
+
+This lives in the `pipeline/` container under a named volume so it persists across container restarts. The Admin UI can expose a "clear seen URLs" action for manual resets (e.g. after a gap in runs).
+
+**Not implemented yet** — add during pipeline wiring (step 4).
+
+---
+
 ## Build Order
 
 1. **Feed container** — get `feed/` running, verify `feed.xml` is reachable on LAN, add to Overcast
 2. **Discovery** — `discovery.py` pulling and deduping articles from all sources
 3. **Ranking + Clustering** — Claude Haiku calls, validate JSON output quality manually
-4. **Pipeline wiring** — `pipeline.py` end-to-end with mocked NotebookLM (avoid burning quota during dev)
-5. **Admin UI** — dashboard, source management, auth status display
+4. **Pipeline wiring** — `pipeline.py` end-to-end with mocked NotebookLM; includes cross-run deduplication (`seen_urls.json` read + write on success)
+5. **Admin UI** — dashboard, source management, auth status display, "clear seen URLs" action
 6. **NotebookLM gen** — `notebooklm login` first-time auth, test single notebook + audio generation
 7. **noVNC re-auth** — Dockerfile with Xvfb/VNC/noVNC, test full re-auth flow in browser
 8. **n8n workflow** — cron trigger, HTTP call to pipeline, failure notification

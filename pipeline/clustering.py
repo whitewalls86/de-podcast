@@ -1,7 +1,6 @@
 import json
-import os
 
-import anthropic
+from pipeline.dev_client import get_anthropic_client
 
 _MODEL = "claude-haiku-4-5-20251001"
 
@@ -29,7 +28,7 @@ async def cluster(articles: list[dict]) -> dict:
     items = [{"url": a["url"], "title": a["title"]} for a in articles]
     user_msg = f"Group these articles into 2 batches:\n{json.dumps(items, indent=2)}"
 
-    client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = get_anthropic_client()
     response = await client.messages.create(
         model=_MODEL,
         max_tokens=1024,

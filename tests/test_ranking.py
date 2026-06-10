@@ -38,9 +38,8 @@ async def test_score_merge_by_url(monkeypatch):
         {"url": articles[1]["url"], "score": 0.7, "topic_tags": ["kafka"], "reason": "good"},
         {"url": articles[2]["url"], "score": 0.3, "topic_tags": [], "reason": "meh"},
     ]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         result = await rank(articles)
     urls = [a["url"] for a in result]
@@ -58,9 +57,8 @@ async def test_topic_tags_preserved(monkeypatch):
         {"url": articles[0]["url"], "score": 0.8, "topic_tags": ["spark", "delta"], "reason": "x"},
         {"url": articles[1]["url"], "score": 0.6, "topic_tags": [], "reason": "y"},
     ]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         result = await rank(articles)
     assert result[0]["topic_tags"] == ["spark", "delta"]
@@ -70,9 +68,8 @@ async def test_topic_tags_preserved(monkeypatch):
 async def test_topic_tags_defaults_to_empty_list_when_absent(monkeypatch):
     articles = make_articles(1)
     scores = [{"url": articles[0]["url"], "score": 0.8, "reason": "no tags field"}]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         result = await rank(articles)
     assert result[0]["topic_tags"] == []
@@ -85,9 +82,8 @@ async def test_score_filtering_drops_below_threshold(monkeypatch):
         {"url": articles[1]["url"], "score": 0.49, "reason": "just below"},
         {"url": articles[2]["url"], "score": 0.0, "reason": "bad"},
     ]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         result = await rank(articles)
     assert len(result) == 1
@@ -100,9 +96,8 @@ async def test_top_10_cap(monkeypatch):
         {"url": articles[i]["url"], "score": round(0.9 - i * 0.01, 2), "reason": "ok"}
         for i in range(15)
     ]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         result = await rank(articles)
     assert len(result) == 10
@@ -115,9 +110,8 @@ async def test_sorted_descending(monkeypatch):
         {"url": articles[1]["url"], "score": 0.9, "reason": "great"},
         {"url": articles[2]["url"], "score": 0.75, "reason": "good"},
     ]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         result = await rank(articles)
     output_scores = [a["score"] for a in result]
@@ -126,24 +120,21 @@ async def test_sorted_descending(monkeypatch):
 
 async def test_invalid_json_raises(monkeypatch):
     articles = make_articles(2)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client("not valid json {{")
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client("not valid json {{")
     ):
         with pytest.raises(ValueError, match="invalid JSON"):
             await rank(articles)
 
 
-async def test_empty_articles_skips_api_call(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+async def test_empty_articles_skips_api_call():
     result = await rank([])
     assert result == []
 
 
 async def test_wrong_top_level_type_raises(monkeypatch):
     articles = make_articles(2)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    with patch("pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client("{}")):
+    with patch("pipeline.ranking.get_anthropic_client", return_value=mock_client("{}")):
         with pytest.raises(ValueError, match="JSON array"):
             await rank(articles)
 
@@ -151,9 +142,8 @@ async def test_wrong_top_level_type_raises(monkeypatch):
 async def test_entry_missing_url_raises(monkeypatch):
     articles = make_articles(1)
     scores = [{"score": 0.9, "reason": "ok"}]  # no url
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         with pytest.raises(ValueError, match="string 'url'"):
             await rank(articles)
@@ -162,9 +152,8 @@ async def test_entry_missing_url_raises(monkeypatch):
 async def test_entry_non_numeric_score_raises(monkeypatch):
     articles = make_articles(1)
     scores = [{"url": articles[0]["url"], "score": "high", "reason": "ok"}]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         with pytest.raises(ValueError, match="'score' must be a float in"):
             await rank(articles)
@@ -173,9 +162,8 @@ async def test_entry_non_numeric_score_raises(monkeypatch):
 async def test_score_above_1_raises(monkeypatch):
     articles = make_articles(1)
     scores = [{"url": articles[0]["url"], "score": 2.0, "reason": "ok"}]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         with pytest.raises(ValueError, match="'score' must be a float in"):
             await rank(articles)
@@ -184,9 +172,8 @@ async def test_score_above_1_raises(monkeypatch):
 async def test_score_below_0_raises(monkeypatch):
     articles = make_articles(1)
     scores = [{"url": articles[0]["url"], "score": -0.1, "reason": "ok"}]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         with pytest.raises(ValueError, match="'score' must be a float in"):
             await rank(articles)
@@ -195,9 +182,8 @@ async def test_score_below_0_raises(monkeypatch):
 async def test_topic_tags_as_string_raises(monkeypatch):
     articles = make_articles(1)
     scores = [{"url": articles[0]["url"], "score": 0.8, "topic_tags": "dbt"}]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         with pytest.raises(ValueError, match="array of strings"):
             await rank(articles)
@@ -206,9 +192,8 @@ async def test_topic_tags_as_string_raises(monkeypatch):
 async def test_topic_tags_with_non_string_elements_raises(monkeypatch):
     articles = make_articles(1)
     scores = [{"url": articles[0]["url"], "score": 0.8, "topic_tags": ["dbt", 42]}]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         with pytest.raises(ValueError, match="array of strings"):
             await rank(articles)
@@ -218,9 +203,8 @@ async def test_score_as_bool_raises(monkeypatch):
     articles = make_articles(1)
     # True is int subclass with value 1, which would pass a plain numeric check
     scores = [{"url": articles[0]["url"], "score": True, "reason": "ok"}]
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
-        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+        "pipeline.ranking.get_anthropic_client", return_value=mock_client(json.dumps(scores))
     ):
         with pytest.raises(ValueError, match="'score' must be a float in"):
             await rank(articles)
