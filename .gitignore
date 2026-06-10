@@ -19,6 +19,9 @@ notebooklm_auth/
 # Docker
 .docker/
 
+# Local scripts
+scripts/
+
 # IDE
 .idea/
 .vscode/
