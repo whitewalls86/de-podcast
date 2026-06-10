@@ -52,6 +52,7 @@ services:
       - "6080:6080"   # noVNC (re-auth browser)
     volumes:
       - episodes:/app/episodes
+      - pipeline_data:/app/data                   # seen_urls.json + feedback.json
       - notebooklm_auth:/root/.notebooklm
       - ./config/sources.json:/app/sources.json   # source list (bind mount — editable)
     environment:
@@ -85,6 +86,7 @@ services:
 
 volumes:
   episodes:
+  pipeline_data:
   notebooklm_auth:
   n8n_data:
 ```
@@ -206,6 +208,103 @@ Second Claude Haiku call. Groups top 10 articles into exactly 2 thematic batches
   }
 }
 ```
+
+---
+
+### 3b. Feedback Loop (`pipeline/feedback.py`)
+
+A lightweight feedback mechanism that lets you rate episodes from within your podcast app, stores those signals, and uses them to improve ranking over time via few-shot examples in the prompt. No new infrastructure — all handled by the pipeline container.
+
+**How it works:**
+
+Each episode's RSS description contains two links:
+```
+👍 Good episode  →  http://192.168.1.x:8001/feedback/{episode_id}?vote=up
+👎 Skip this topic  →  http://192.168.1.x:8001/feedback/{episode_id}?vote=down
+```
+
+Tapping either link from Overcast/Pocket Casts opens a minimal mobile confirmation page, records the vote, done.
+
+**Feedback storage (`/app/data/feedback.json`):**
+```json
+[
+  {
+    "episode_id": "dbt-testing-data-quality-2026-06-10",
+    "title": "dbt, testing, and data quality",
+    "topic_tags": ["dbt", "testing", "data quality"],
+    "article_urls": ["https://...", "https://..."],
+    "vote": "up",
+    "timestamp": "2026-06-10T08:23:11Z"
+  }
+]
+```
+
+**Ranker prompt injection:**
+
+When `ranking.py` builds the Claude Haiku prompt, it reads the last 20 feedback entries and injects them as few-shot context:
+
+```python
+def build_ranking_prompt(articles, feedback):
+    liked = [f for f in feedback if f["vote"] == "up"][-10:]
+    disliked = [f for f in feedback if f["vote"] == "down"][-10:]
+
+    liked_context = "\n".join(
+        f"- {f['title']} (tags: {', '.join(f['topic_tags'])})"
+        for f in liked
+    )
+    disliked_context = "\n".join(
+        f"- {f['title']} (tags: {', '.join(f['topic_tags'])})"
+        for f in disliked
+    )
+
+    return f"""
+You are scoring data engineering articles for inclusion in a daily podcast.
+
+The user has previously enjoyed episodes on these topics:
+{liked_context}
+
+The user has previously disliked episodes on these topics:
+{disliked_context}
+
+Score the following articles 0.0–1.0 for likely interest. Weight topic similarity
+to liked episodes positively, and similarity to disliked episodes negatively.
+
+Return JSON: [{{"url": "...", "score": 0.0, "topic_tags": [...], "reason": "..."}}]
+
+Articles:
+{format_articles(articles)}
+"""
+```
+
+**New endpoints (added to `main.py`):**
+```
+GET  /feedback/{episode_id}?vote=up|down
+     → Records vote to feedback.json
+     → Returns mobile confirmation page
+     → Idempotent: re-voting overwrites previous vote for that episode
+
+GET  /admin/feedback
+     → Feedback history in admin UI (vote breakdown, top liked/disliked tags)
+```
+
+**Feed description template update (`feed/main.py`):**
+```python
+description = f"""
+{episode.description}
+
+---
+Was this episode useful?
+👍 Yes: {FEED_HOST}/feedback/{episode.id}?vote=up
+👎 No: {FEED_HOST}/feedback/{episode.id}?vote=down
+"""
+```
+
+**Graceful degradation:**
+- If `feedback.json` doesn't exist yet (first run), the few-shot section is omitted — no error, no behavior change
+- If fewer than 3 feedback entries exist, the few-shot section is omitted (insufficient signal)
+- A failed vote write is logged but never surfaces as an error to the user
+
+**Cost impact:** Zero. The few-shot examples add ~200–400 tokens to the ranking prompt — a fraction of a cent per day at Haiku pricing.
 
 ---
 
@@ -343,13 +442,15 @@ de-podcast/
 │   ├── clustering.py
 │   ├── dev_client.py             # subprocess-backed Claude client for local dev
 │   ├── notebooklm_gen.py
+│   ├── feedback.py               # read/write feedback.json, build few-shot context
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
 │   ├── utils.py
 │   └── templates/                # Jinja2 HTML templates
 │       ├── base.html
 │       ├── dashboard.html
-│       └── sources.html
+│       ├── sources.html
+│       └── feedback_confirm.html # mobile vote confirmation page
 │
 ├── feed/
 │   ├── Dockerfile
@@ -363,6 +464,8 @@ de-podcast/
     ├── test_discovery.py
     ├── test_ranking.py
     ├── test_clustering.py
+    ├── test_pipeline.py
+    ├── test_main.py
     └── test_feed.py
 ```
 
@@ -511,9 +614,9 @@ The file is written only on success — if NotebookLM generation fails, URLs are
 data/seen_urls.json  →  ["https://...", "https://...", ...]
 ```
 
-This lives in the `pipeline/` container under a named volume so it persists across container restarts. The Admin UI can expose a "clear seen URLs" action for manual resets (e.g. after a gap in runs).
+This lives in the `pipeline/` container under the `pipeline_data` named volume so it persists across container restarts. The Admin UI can expose a "clear seen URLs" action for manual resets (e.g. after a gap in runs).
 
-**Not implemented yet** — add during pipeline wiring (step 4).
+Implemented in step 4 (pipeline wiring).
 
 ---
 
@@ -522,6 +625,7 @@ This lives in the `pipeline/` container under a named volume so it persists acro
 1. **Feed container** — get `feed/` running, verify `feed.xml` is reachable on LAN, add to Overcast
 2. **Discovery** — `discovery.py` pulling and deduping articles from all sources
 3. **Ranking + Clustering** — Claude Haiku calls, validate JSON output quality manually
+3b. **Feedback loop** — `feedback.py`, update `ranking.py` with few-shot injection, `/feedback/{id}` endpoint + confirmation template, update feed description template, `/admin/feedback` view
 4. **Pipeline wiring** — `pipeline.py` end-to-end with mocked NotebookLM; includes cross-run deduplication (`seen_urls.json` read + write on success)
 5. **Admin UI** — dashboard, source management, auth status display, "clear seen URLs" action
 6. **NotebookLM gen** — `notebooklm login` first-time auth, test single notebook + audio generation
