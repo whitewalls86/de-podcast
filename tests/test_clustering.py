@@ -90,6 +90,19 @@ async def test_wrong_top_level_type_raises(monkeypatch):
             await cluster(articles)
 
 
+async def test_batch_value_not_dict_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {"batch_a": [], "batch_b": {"title": "B", "urls": [urls[1]]}}
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="must be an object"):
+            await cluster(articles)
+
+
 async def test_missing_url_raises(monkeypatch):
     urls = ["http://example.com/1", "http://example.com/2", "http://example.com/3"]
     articles = make_articles(urls)

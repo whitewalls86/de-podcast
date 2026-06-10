@@ -166,5 +166,39 @@ async def test_entry_non_numeric_score_raises(monkeypatch):
     with patch(
         "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
     ):
-        with pytest.raises(ValueError, match="numeric 'score'"):
+        with pytest.raises(ValueError, match="'score' must be a float in"):
+            await rank(articles)
+
+
+async def test_score_above_1_raises(monkeypatch):
+    articles = make_articles(1)
+    scores = [{"url": articles[0]["url"], "score": 2.0, "reason": "ok"}]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        with pytest.raises(ValueError, match="'score' must be a float in"):
+            await rank(articles)
+
+
+async def test_score_below_0_raises(monkeypatch):
+    articles = make_articles(1)
+    scores = [{"url": articles[0]["url"], "score": -0.1, "reason": "ok"}]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        with pytest.raises(ValueError, match="'score' must be a float in"):
+            await rank(articles)
+
+
+async def test_score_as_bool_raises(monkeypatch):
+    articles = make_articles(1)
+    # True is int subclass with value 1, which would pass a plain numeric check
+    scores = [{"url": articles[0]["url"], "score": True, "reason": "ok"}]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        with pytest.raises(ValueError, match="'score' must be a float in"):
             await rank(articles)

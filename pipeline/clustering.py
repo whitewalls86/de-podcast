@@ -61,6 +61,10 @@ def _validate_clusters(result: dict, input_urls: set[str]) -> None:
     returned: list[str] = []
     for key in ("batch_a", "batch_b"):
         batch = result[key]
+        if not isinstance(batch, dict):
+            raise ValueError(
+                f"Clustering batch {key} must be an object, got {type(batch).__name__}"
+            )
         title = batch.get("title", "")
         if not isinstance(title, str) or not title.strip():
             raise ValueError(f"Clustering returned missing or empty title for {key}")

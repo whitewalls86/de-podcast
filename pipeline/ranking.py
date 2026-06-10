@@ -48,8 +48,11 @@ async def rank(articles: list[dict]) -> list[dict]:
             raise ValueError(f"Claude ranking entry {i} is not an object: {item!r}")
         if not isinstance(item.get("url"), str):
             raise ValueError(f"Claude ranking entry {i} missing string 'url': {item!r}")
-        if not isinstance(item.get("score"), int | float):
-            raise ValueError(f"Claude ranking entry {i} missing numeric 'score': {item!r}")
+        score = item.get("score")
+        if isinstance(score, bool) or not isinstance(score, int | float) or not 0 <= score <= 1:
+            raise ValueError(
+                f"Claude ranking entry {i} 'score' must be a float in [0, 1]: {item!r}"
+            )
 
     score_map = {item["url"]: item for item in scores}
 
