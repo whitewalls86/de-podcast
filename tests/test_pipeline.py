@@ -141,6 +141,34 @@ async def test_partial_failure_does_not_block_other_batch(tmp_path):
 
     assert len(result["batches"]) == 1
     assert result["batches"][0]["title"] == "Batch"
+    # only URLs from the successful batch should be marked seen
+    written = set(json.loads(seen.read_text()))
+    assert written == set(_CLUSTERS["batch_b"]["urls"])
+    assert not written.intersection(_CLUSTERS["batch_a"]["urls"])
+
+
+async def test_fewer_than_two_ranked_returns_no_op(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+
+    one_article = _RANKED[:1]
+    patches = [
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=AsyncMock(return_value=one_article)),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        result = await run_pipeline(
+            sources_path=sources, seen_path=seen, generate_fn=_fake_generate
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert result == {"batches": [], "articles_seen": 0}
+    assert not seen.exists()
 
 
 async def test_seen_file_created_if_absent(tmp_path):
