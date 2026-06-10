@@ -285,3 +285,48 @@ def test_retention_prunes_oldest(tmp_path, monkeypatch):
     assert len(episodes) == 2
     assert episodes[0]["title"] == "Episode 1"
     assert not (tmp_path / "ep0.mp3").exists()
+
+
+# --- metadata file isolation ---
+# episodes.json and feed.xml live in EPISODES_DIR but must not be served
+# through the unauthenticated /episodes/{filename} route.
+
+
+def test_episodes_json_not_served_via_episode_route():
+    post_episode()
+    r = client.get("/episodes/episodes.json")
+    assert r.status_code == 404
+
+
+def test_feed_xml_not_served_via_episode_route():
+    post_episode()
+    r = client.get("/episodes/feed.xml")
+    assert r.status_code == 404
+
+
+# --- URL encoding ---
+
+
+def test_filename_with_spaces_produces_encoded_url():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "Spaced Out", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": ("my episode.mp3", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert r.status_code == 200
+    assert "%20" in r.json()["url"]
+    assert " " not in r.json()["url"]
+
+
+def test_encoded_url_appears_in_feed_enclosure():
+    client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "Spaced", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": ("my episode.mp3", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    xml = ET.fromstring(client.get("/feed.xml").content)
+    enclosure = xml.find("channel/item/enclosure")
+    assert "%20" in enclosure.get("url", "")
+    assert " " not in enclosure.get("url", "")

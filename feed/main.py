@@ -4,6 +4,7 @@ import shutil
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -113,7 +114,7 @@ def add_episode(
         shutil.copyfileobj(file.file, f)
 
     size = dest.stat().st_size
-    url = f"{FEED_HOST}/episodes/{filename}"
+    url = f"{FEED_HOST}/episodes/{quote(filename, safe='')}"
 
     entry = {
         "filename": filename,
@@ -157,6 +158,9 @@ def get_feed() -> FileResponse:
 
 @app.get("/episodes/{filename}")
 def get_episode(filename: str) -> FileResponse:
+    retained = {e["filename"] for e in load_episodes()}
+    if filename not in retained:
+        raise HTTPException(status_code=404, detail="Episode not found")
     path = EPISODES_DIR / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="Episode not found")
