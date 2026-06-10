@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import subprocess
 from types import SimpleNamespace
@@ -6,24 +7,29 @@ from types import SimpleNamespace
 import anthropic
 
 
-def _strip_fences(text: str) -> str:
-    """Remove markdown code fences that the claude CLI adds around JSON responses."""
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1]  # drop opening ```[lang] line
-        if text.endswith("```"):
-            text = text[: text.rfind("```")]
-    return text.strip()
-
-
 def _run_claude(prompt: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["claude", "-p"],
+        ["claude", "-p", "--output-format", "json"],
         input=prompt,
         shell=False,
         capture_output=True,
         text=True,
         timeout=120,
     )
+
+
+def _log_usage(usage: dict) -> None:
+    parts = [
+        f"input={usage.get('input_tokens', '?')}",
+        f"output={usage.get('output_tokens', '?')}",
+    ]
+    cache_read = usage.get("cache_read_input_tokens", 0)
+    if cache_read:
+        parts.append(f"cache_read={cache_read}")
+    cost = usage.get("total_cost_usd")
+    if cost is not None:
+        parts.append(f"cost=${cost:.4f}")
+    print(f"[dev-client] tokens: {', '.join(parts)}", flush=True)
 
 
 class _Messages:
@@ -42,9 +48,23 @@ class _Messages:
             raise RuntimeError(
                 f"claude CLI exited with code {result.returncode}: {result.stderr.strip()}"
             )
-        text = _strip_fences(result.stdout.strip())
-        if not text:
+
+        raw = result.stdout.strip()
+        if not raw:
             raise RuntimeError("claude CLI returned empty output")
+
+        try:
+            envelope = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"claude CLI returned non-JSON output: {e}\nRaw: {raw!r}") from e
+
+        text = envelope.get("result", "").strip()
+        if not text:
+            raise RuntimeError(f"claude CLI JSON missing 'result' field: {raw!r}")
+
+        usage = envelope.get("usage", {})
+        if usage:
+            _log_usage(usage)
 
         return SimpleNamespace(content=[SimpleNamespace(text=text)])
 

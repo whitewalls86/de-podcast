@@ -1,3 +1,4 @@
+import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -6,8 +7,14 @@ import pytest
 
 from pipeline.dev_client import DevClient, get_anthropic_client
 
+_CLI_FLAGS = ["claude", "-p", "--output-format", "json"]
 
-def make_completed_process(stdout: str = "hello", returncode: int = 0, stderr: str = ""):
+
+def make_envelope(text: str, usage: dict | None = None) -> str:
+    return json.dumps({"result": text, "usage": usage or {}})
+
+
+def make_completed_process(stdout: str = "", returncode: int = 0, stderr: str = ""):
     result = MagicMock(spec=subprocess.CompletedProcess)
     result.stdout = stdout
     result.returncode = returncode
@@ -29,12 +36,10 @@ def test_get_anthropic_client_returns_dev_client_when_true(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dev_client_returns_stdout_as_text(monkeypatch):
-    monkeypatch.setenv("USE_DEV_CLIENT", "true")
+async def test_dev_client_returns_result_text(monkeypatch):
     client = DevClient()
-    with patch(
-        "subprocess.run", return_value=make_completed_process(stdout="some output")
-    ) as mock_run:
+    stdout = make_envelope("some output")
+    with patch("subprocess.run", return_value=make_completed_process(stdout=stdout)) as mock_run:
         response = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=100,
@@ -42,25 +47,52 @@ async def test_dev_client_returns_stdout_as_text(monkeypatch):
             messages=[{"role": "user", "content": "msg"}],
         )
     assert response.content[0].text == "some output"
-    # Verify the prompt travels via stdin, not as a CLI argument (Windows CreateProcess length limit)
+    # Verify stdin invocation and correct flags (guards against Windows CreateProcess length limit regression)
     args, kwargs = mock_run.call_args
-    assert args[0] == ["claude", "-p"]
+    assert args[0] == _CLI_FLAGS
     assert kwargs["input"] == "sys\n\nmsg"
 
 
 @pytest.mark.asyncio
-async def test_dev_client_strips_markdown_fences():
+async def test_dev_client_logs_usage(capsys):
     client = DevClient()
-    fenced = "```json\n[1, 2, 3]\n```"
-    with patch("subprocess.run", return_value=make_completed_process(stdout=fenced)):
-        response = await client.messages.create(
+    usage = {"input_tokens": 100, "output_tokens": 50, "total_cost_usd": 0.0012}
+    stdout = make_envelope("hello", usage=usage)
+    with patch("subprocess.run", return_value=make_completed_process(stdout=stdout)):
+        await client.messages.create(
             model="m", max_tokens=100, messages=[{"role": "user", "content": "x"}]
         )
-    assert response.content[0].text == "[1, 2, 3]"
+    out = capsys.readouterr().out
+    assert "input=100" in out
+    assert "output=50" in out
+    assert "cost=$0.0012" in out
 
 
 @pytest.mark.asyncio
-async def test_dev_client_nonzero_exit_raises(monkeypatch):
+async def test_dev_client_non_json_stdout_raises():
+    client = DevClient()
+    with patch("subprocess.run", return_value=make_completed_process(stdout="not json")):
+        with pytest.raises(RuntimeError, match="non-JSON output"):
+            await client.messages.create(
+                model="m", max_tokens=100, messages=[{"role": "user", "content": "x"}]
+            )
+
+
+@pytest.mark.asyncio
+async def test_dev_client_missing_result_field_raises():
+    client = DevClient()
+    with patch(
+        "subprocess.run",
+        return_value=make_completed_process(stdout=json.dumps({"usage": {}})),
+    ):
+        with pytest.raises(RuntimeError, match="missing 'result' field"):
+            await client.messages.create(
+                model="m", max_tokens=100, messages=[{"role": "user", "content": "x"}]
+            )
+
+
+@pytest.mark.asyncio
+async def test_dev_client_nonzero_exit_raises():
     client = DevClient()
     with patch(
         "subprocess.run",
@@ -73,7 +105,7 @@ async def test_dev_client_nonzero_exit_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dev_client_empty_stdout_raises(monkeypatch):
+async def test_dev_client_empty_stdout_raises():
     client = DevClient()
     with patch("subprocess.run", return_value=make_completed_process(stdout="   ")):
         with pytest.raises(RuntimeError, match="empty output"):
@@ -83,7 +115,7 @@ async def test_dev_client_empty_stdout_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dev_client_timeout_raises(monkeypatch):
+async def test_dev_client_timeout_raises():
     client = DevClient()
     with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=120)):
         with pytest.raises(RuntimeError, match="timed out"):
@@ -93,7 +125,7 @@ async def test_dev_client_timeout_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dev_client_not_on_path_raises(monkeypatch):
+async def test_dev_client_not_on_path_raises():
     client = DevClient()
     with patch("subprocess.run", side_effect=FileNotFoundError()):
         with pytest.raises(FileNotFoundError, match="claude CLI not found"):
