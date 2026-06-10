@@ -32,7 +32,9 @@ def test_get_anthropic_client_returns_dev_client_when_true(monkeypatch):
 async def test_dev_client_returns_stdout_as_text(monkeypatch):
     monkeypatch.setenv("USE_DEV_CLIENT", "true")
     client = DevClient()
-    with patch("subprocess.run", return_value=make_completed_process(stdout="some output")):
+    with patch(
+        "subprocess.run", return_value=make_completed_process(stdout="some output")
+    ) as mock_run:
         response = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=100,
@@ -40,6 +42,10 @@ async def test_dev_client_returns_stdout_as_text(monkeypatch):
             messages=[{"role": "user", "content": "msg"}],
         )
     assert response.content[0].text == "some output"
+    # Verify the prompt travels via stdin, not as a CLI argument (Windows CreateProcess length limit)
+    args, kwargs = mock_run.call_args
+    assert args[0] == ["claude", "-p"]
+    assert kwargs["input"] == "sys\n\nmsg"
 
 
 @pytest.mark.asyncio
