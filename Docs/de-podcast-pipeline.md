@@ -341,6 +341,7 @@ de-podcast/
 │   ├── discovery.py
 │   ├── ranking.py
 │   ├── clustering.py
+│   ├── dev_client.py             # subprocess-backed Claude client for dev (see Dev Client)
 │   ├── notebooklm_gen.py
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
@@ -355,9 +356,13 @@ de-podcast/
 │   ├── requirements.txt
 │   └── main.py                   # FastAPI feed server
 │
+├── scripts/
+│   └── test_pipeline.py          # manual end-to-end smoke test (uses dev client)
+│
 └── tests/
     ├── test_discovery.py
     ├── test_ranking.py
+    ├── test_clustering.py
     └── test_feed.py
 ```
 
@@ -432,6 +437,37 @@ n8n and the pipeline container are on the same Docker network, so `http://pipeli
 | Article sources go stale | Low | Admin UI source management; add/remove without redeploy |
 | Daily limit hit (3/day free) | Very low | Pipeline uses exactly 2; 1 in reserve |
 | Windows machine sleeps | Low | Disable sleep in Windows power settings |
+
+---
+
+## Dev Client (Claude CLI workaround)
+
+During early development, before loading Anthropic API credits, `ranking.py` and `clustering.py` can run against the Claude.ai subscription (via the `claude` CLI) instead of the paid API.
+
+**Toggle:** set `USE_DEV_CLIENT=true` in the environment. When unset or `false`, the normal `anthropic.AsyncAnthropic` client is used (prod path).
+
+**How it works (`pipeline/dev_client.py`):**
+
+`DevClient` implements the same `client.messages.create(...)` interface as the Anthropic SDK. Instead of making an API call it shells out to `claude -p "<system>\n\n<user message>"`, captures stdout, and wraps it in a minimal response object so `ranking.py` and `clustering.py` see no difference.
+
+```
+USE_DEV_CLIENT=true  →  DevClient (subprocess → claude CLI → Claude.ai subscription)
+USE_DEV_CLIENT unset →  anthropic.AsyncAnthropic (Anthropic API → API credits)
+```
+
+**Known limitations of dev mode:**
+
+- `claude -p` can add conversational framing around JSON; the existing response-shape validation in `rank()`/`cluster()` will catch and surface this as a clear error.
+- Subject to Claude.ai rate limits — not suitable for high-volume runs.
+- Not available inside Docker containers (no `claude` CLI installed there); dev mode is local only.
+
+**Smoke test script (`scripts/test_pipeline.py`):**
+
+Runs `discover()` → `rank()` → `cluster()` end-to-end against live sources and prints the results. Uses dev client by default. Not part of the automated test suite — intended for manual validation before committing API credits.
+
+```bash
+USE_DEV_CLIENT=true python scripts/test_pipeline.py
+```
 
 ---
 
