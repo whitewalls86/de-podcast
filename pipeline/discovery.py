@@ -8,7 +8,8 @@ import feedparser
 import httpx
 from dateutil import parser as dateutil_parser
 
-_HN_PARAMS = {"tags": "story", "query": "data+engineering", "hitsPerPage": "30"}
+_HN_PARAMS = {"tags": "story", "query": "data engineering", "hitsPerPage": "30"}
+_RSS_TIMEOUT = 15
 _SNIPPET_MAX = 300
 
 
@@ -29,7 +30,11 @@ def _snippet(text: str | None) -> str:
 
 
 async def _fetch_rss(source: dict) -> list[dict]:
-    feed = await asyncio.to_thread(feedparser.parse, source["url"])
+    async with httpx.AsyncClient(timeout=_RSS_TIMEOUT) as client:
+        r = await client.get(source["url"])
+        r.raise_for_status()
+        content = r.content
+    feed = await asyncio.to_thread(feedparser.parse, content)
     results = []
     for entry in feed.entries:
         url = entry.get("link", "")

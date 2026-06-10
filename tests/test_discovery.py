@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from pipeline.discovery import discover
 
-UTC = UTC
 NOW = datetime.now(tz=UTC)
 RECENT = NOW - timedelta(hours=10)
 OLD = NOW - timedelta(hours=72)
@@ -44,6 +43,24 @@ def fake_feed(entries: list) -> MagicMock:
     return f
 
 
+def mock_rss_client(url_to_raise: str | None = None):
+    """httpx mock for RSS: returns empty bytes content; optionally raises for one URL."""
+    ok_resp = MagicMock()
+    ok_resp.raise_for_status = MagicMock()
+    ok_resp.content = b""
+
+    fail_resp = MagicMock()
+    fail_resp.raise_for_status.side_effect = Exception("network error")
+
+    async def fake_get(url, **kwargs):
+        return fail_resp if str(url) == url_to_raise else ok_resp
+
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get = fake_get
+    return client
+
+
 def mock_hn_client(hits: list[dict]) -> MagicMock:
     resp = MagicMock()
     resp.raise_for_status = MagicMock()
@@ -68,11 +85,10 @@ def hn_hit(title: str, url: str, published: datetime, story_text: str = "") -> d
 
 async def test_rss_parses_fields(tmp_path):
     p = write_sources(tmp_path, [RSS_SOURCE])
-    with patch(
-        "pipeline.discovery.feedparser.parse",
-        return_value=fake_feed([rss_entry("My Article", "http://ex.com/a", RECENT, "A summary")]),
-    ):
-        articles = await discover(p)
+    entry = rss_entry("My Article", "http://ex.com/a", RECENT, "A summary")
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
+            articles = await discover(p)
     assert len(articles) == 1
     a = articles[0]
     assert a["title"] == "My Article"
@@ -85,11 +101,12 @@ async def test_rss_parses_fields(tmp_path):
 
 async def test_rss_skips_entry_without_url(tmp_path):
     p = write_sources(tmp_path, [RSS_SOURCE])
-    with patch(
-        "pipeline.discovery.feedparser.parse",
-        return_value=fake_feed([rss_entry("No URL", "", RECENT)]),
-    ):
-        articles = await discover(p)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch(
+            "pipeline.discovery.feedparser.parse",
+            return_value=fake_feed([rss_entry("No URL", "", RECENT)]),
+        ):
+            articles = await discover(p)
     assert articles == []
 
 
@@ -101,8 +118,9 @@ async def test_rss_skips_entry_without_date(tmp_path):
         "summary": "",
         "description": "",
     }
-    with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
-        articles = await discover(p)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
+            articles = await discover(p)
     assert articles == []
 
 
@@ -130,6 +148,14 @@ async def test_hn_skips_hits_without_url(tmp_path):
     assert articles == []
 
 
+async def test_hn_query_does_not_contain_literal_plus(tmp_path):
+    """Ensure the HN query string is 'data engineering', not 'data+engineering'."""
+    from pipeline.discovery import _HN_PARAMS
+
+    assert _HN_PARAMS["query"] == "data engineering"
+    assert "+" not in _HN_PARAMS["query"]
+
+
 # --- 48h filter ---
 
 
@@ -139,8 +165,9 @@ async def test_filters_articles_older_than_48h(tmp_path):
         rss_entry("Recent", "http://ex.com/new", RECENT),
         rss_entry("Old", "http://ex.com/old", OLD),
     ]
-    with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed(entries)):
-        articles = await discover(p)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed(entries)):
+            articles = await discover(p)
     assert len(articles) == 1
     assert articles[0]["title"] == "Recent"
 
@@ -148,9 +175,12 @@ async def test_filters_articles_older_than_48h(tmp_path):
 async def test_article_exactly_at_cutoff_boundary_is_included(tmp_path):
     p = write_sources(tmp_path, [RSS_SOURCE])
     just_inside = NOW - timedelta(hours=47, minutes=59)
-    entry = rss_entry("Borderline", "http://ex.com/border", just_inside)
-    with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
-        articles = await discover(p)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch(
+            "pipeline.discovery.feedparser.parse",
+            return_value=fake_feed([rss_entry("Borderline", "http://ex.com/border", just_inside)]),
+        ):
+            articles = await discover(p)
     assert len(articles) == 1
 
 
@@ -162,14 +192,15 @@ async def test_deduplicates_same_url_across_sources(tmp_path):
     src_b = {"name": "B", "url": "http://b.com/feed", "type": "rss", "active": True}
     p = write_sources(tmp_path, [src_a, src_b])
     shared_url = "http://shared.com/article"
-
-    feeds = [
-        fake_feed([rss_entry("Article", shared_url, RECENT)]),
-        fake_feed([rss_entry("Article", shared_url, RECENT)]),
-    ]
-    call_count = iter(feeds)
-    with patch("pipeline.discovery.feedparser.parse", side_effect=lambda _: next(call_count)):
-        articles = await discover(p)
+    feeds = iter(
+        [
+            fake_feed([rss_entry("Article", shared_url, RECENT)]),
+            fake_feed([rss_entry("Article", shared_url, RECENT)]),
+        ]
+    )
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", side_effect=lambda _: next(feeds)):
+            articles = await discover(p)
     assert len(articles) == 1
     assert articles[0]["url"] == shared_url
 
@@ -179,16 +210,28 @@ async def test_deduplicates_same_url_across_sources(tmp_path):
 
 async def test_skips_inactive_sources(tmp_path):
     p = write_sources(tmp_path, [INACTIVE, RSS_SOURCE])
-    called_urls: list[str] = []
+    fetched_urls: list[str] = []
 
-    def fake_parse(url: str):
-        called_urls.append(url)
-        return fake_feed([rss_entry("Active Article", "http://ex.com/art", RECENT)])
+    ok_resp = MagicMock()
+    ok_resp.raise_for_status = MagicMock()
+    ok_resp.content = b""
 
-    with patch("pipeline.discovery.feedparser.parse", side_effect=fake_parse):
-        articles = await discover(p)
+    async def fake_get(url, **kwargs):
+        fetched_urls.append(str(url))
+        return ok_resp
 
-    assert INACTIVE["url"] not in called_urls
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get = fake_get
+
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=client):
+        with patch(
+            "pipeline.discovery.feedparser.parse",
+            return_value=fake_feed([rss_entry("Art", "http://ex.com/art", RECENT)]),
+        ):
+            articles = await discover(p)
+
+    assert INACTIVE["url"] not in fetched_urls
     assert len(articles) == 1
 
 
@@ -208,13 +251,11 @@ async def test_failed_source_does_not_block_others(tmp_path):
     src_b = {"name": "B", "url": "http://b.com/feed", "type": "rss", "active": True}
     p = write_sources(tmp_path, [src_a, src_b])
     good_feed = fake_feed([rss_entry("Good", "http://ex.com/good", RECENT)])
-
-    def fake_parse(url: str):
-        if url == src_a["url"]:
-            raise Exception("network error")
-        return good_feed
-
-    with patch("pipeline.discovery.feedparser.parse", side_effect=fake_parse):
-        articles = await discover(p)
+    with patch(
+        "pipeline.discovery.httpx.AsyncClient",
+        return_value=mock_rss_client(url_to_raise=src_a["url"]),
+    ):
+        with patch("pipeline.discovery.feedparser.parse", return_value=good_feed):
+            articles = await discover(p)
     assert len(articles) == 1
     assert articles[0]["title"] == "Good"
