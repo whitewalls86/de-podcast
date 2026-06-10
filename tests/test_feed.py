@@ -1,5 +1,6 @@
 import io
 import json
+import xml.etree.ElementTree as ET
 
 import pytest
 from fastapi.testclient import TestClient
@@ -114,6 +115,34 @@ def test_get_episode_404():
     assert r.status_code == 404
 
 
+def test_get_episode_returns_content():
+    post_episode(filename="ep.mp3", data=b"real audio bytes")
+    r = client.get("/episodes/ep.mp3")
+    assert r.status_code == 200
+    assert r.content == b"real audio bytes"
+
+
+def test_get_episode_content_type():
+    post_episode(filename="ep.mp3")
+    r = client.get("/episodes/ep.mp3")
+    assert r.headers["content-type"] == "audio/mpeg"
+
+
+# --- unsafe filenames ---
+# "." and ".." are rejected (422); traversal paths are stripped to basename.
+
+
+@pytest.mark.parametrize("bad_name", [".", ".."])
+def test_dot_filename_rejected(bad_name):
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={"title": "Bad", "pub_date": "2026-06-10T06:00:00"},
+        files={"file": (bad_name, io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert r.status_code == 422
+
+
 # --- path traversal ---
 # Traversal attempts are sanitized to basename — the file is accepted but
 # written safely inside EPISODES_DIR, never at the traversal target.
@@ -152,6 +181,64 @@ def test_duplicate_filename_replaces_entry():
     assert len(episodes) == 1
     assert episodes[0]["title"] == "Version 2"
     assert feed_module.EPISODES_DIR.joinpath("today.mp3").read_bytes() == b"v2"
+
+
+def test_duplicate_filename_feed_reflects_updated_title():
+    post_episode(filename="today.mp3", title="Old Title")
+    post_episode(filename="today.mp3", title="New Title")
+    r = client.get("/feed.xml")
+    assert b"New Title" in r.content
+    assert b"Old Title" not in r.content
+
+
+def test_duplicate_filename_multiple_reruns_stays_one_entry():
+    for i in range(4):
+        post_episode(filename="today.mp3", title=f"Run {i}")
+    episodes = json.loads(feed_module.EPISODES_JSON.read_text())
+    assert len(episodes) == 1
+    assert episodes[0]["title"] == "Run 3"
+
+
+# --- feed XML / iTunes structure ---
+
+ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
+
+
+def test_feed_is_valid_rss():
+    post_episode(title="Spark Internals", filename="spark.mp3", data=b"audio")
+    xml = ET.fromstring(client.get("/feed.xml").content)
+    assert xml.tag == "rss"
+    assert xml.get("version") == "2.0"
+    assert xml.find("channel") is not None
+
+
+def test_feed_has_itunes_namespace():
+    post_episode()
+    content = client.get("/feed.xml").content.decode()
+    assert "itunes" in content
+
+
+def test_feed_item_has_enclosure():
+    post_episode(filename="spark.mp3", data=b"x" * 100)
+    xml = ET.fromstring(client.get("/feed.xml").content)
+    enclosure = xml.find("channel/item/enclosure")
+    assert enclosure is not None
+    assert enclosure.get("type") == "audio/mpeg"
+    assert "spark.mp3" in enclosure.get("url", "")
+
+
+def test_feed_enclosure_length_matches_file_size():
+    data = b"x" * 512
+    post_episode(filename="sized.mp3", data=data)
+    xml = ET.fromstring(client.get("/feed.xml").content)
+    enclosure = xml.find("channel/item/enclosure")
+    assert int(enclosure.get("length", 0)) == len(data)
+
+
+def test_feed_item_has_pub_date():
+    post_episode()
+    xml = ET.fromstring(client.get("/feed.xml").content)
+    assert xml.find("channel/item/pubDate") is not None
 
 
 # --- retention ---
