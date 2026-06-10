@@ -82,6 +82,14 @@ async def test_invalid_json_raises(monkeypatch):
             await cluster(articles)
 
 
+async def test_wrong_top_level_type_raises(monkeypatch):
+    articles = make_articles(["http://example.com/1", "http://example.com/2"])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch("pipeline.clustering.anthropic.AsyncAnthropic", return_value=mock_client("[]")):
+        with pytest.raises(ValueError, match="JSON object"):
+            await cluster(articles)
+
+
 async def test_missing_url_raises(monkeypatch):
     urls = ["http://example.com/1", "http://example.com/2", "http://example.com/3"]
     articles = make_articles(urls)

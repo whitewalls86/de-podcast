@@ -43,6 +43,11 @@ async def cluster(articles: list[dict]) -> dict:
     except json.JSONDecodeError as e:
         raise ValueError(f"Claude returned invalid JSON from clustering: {e}\nRaw: {raw!r}") from e
 
+    if not isinstance(result, dict):
+        raise ValueError(
+            f"Claude clustering response must be a JSON object,"
+            f" got {type(result).__name__}: {raw!r}"
+        )
     _validate_clusters(result, {a["url"] for a in articles})
     return result
 

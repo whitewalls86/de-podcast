@@ -138,3 +138,33 @@ async def test_empty_articles_skips_api_call(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     result = await rank([])
     assert result == []
+
+
+async def test_wrong_top_level_type_raises(monkeypatch):
+    articles = make_articles(2)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch("pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client("{}")):
+        with pytest.raises(ValueError, match="JSON array"):
+            await rank(articles)
+
+
+async def test_entry_missing_url_raises(monkeypatch):
+    articles = make_articles(1)
+    scores = [{"score": 0.9, "reason": "ok"}]  # no url
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        with pytest.raises(ValueError, match="string 'url'"):
+            await rank(articles)
+
+
+async def test_entry_non_numeric_score_raises(monkeypatch):
+    articles = make_articles(1)
+    scores = [{"url": articles[0]["url"], "score": "high", "reason": "ok"}]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        with pytest.raises(ValueError, match="numeric 'score'"):
+            await rank(articles)

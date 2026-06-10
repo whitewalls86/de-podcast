@@ -39,6 +39,18 @@ async def rank(articles: list[dict]) -> list[dict]:
     except json.JSONDecodeError as e:
         raise ValueError(f"Claude returned invalid JSON from ranking: {e}\nRaw: {raw!r}") from e
 
+    if not isinstance(scores, list):
+        raise ValueError(
+            f"Claude ranking response must be a JSON array, got {type(scores).__name__}: {raw!r}"
+        )
+    for i, item in enumerate(scores):
+        if not isinstance(item, dict):
+            raise ValueError(f"Claude ranking entry {i} is not an object: {item!r}")
+        if not isinstance(item.get("url"), str):
+            raise ValueError(f"Claude ranking entry {i} missing string 'url': {item!r}")
+        if not isinstance(item.get("score"), int | float):
+            raise ValueError(f"Claude ranking entry {i} missing numeric 'score': {item!r}")
+
     score_map = {item["url"]: item for item in scores}
 
     ranked = []
