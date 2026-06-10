@@ -20,6 +20,12 @@ Return ONLY a JSON object, no commentary:
 
 
 async def cluster(articles: list[dict]) -> dict:
+    if len(articles) < 2:
+        raise ValueError(
+            f"cluster() requires at least 2 articles to form two non-empty batches,"
+            f" got {len(articles)}"
+        )
+
     items = [{"url": a["url"], "title": a["title"]} for a in articles]
     user_msg = f"Group these articles into 2 batches:\n{json.dumps(items, indent=2)}"
 
@@ -50,6 +56,9 @@ def _validate_clusters(result: dict, input_urls: set[str]) -> None:
     returned: list[str] = []
     for key in ("batch_a", "batch_b"):
         batch = result[key]
+        title = batch.get("title", "")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError(f"Clustering returned missing or empty title for {key}")
         urls = batch.get("urls", [])
         if not urls:
             raise ValueError(f"Clustering returned empty URL list for {key}")

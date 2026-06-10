@@ -73,7 +73,7 @@ async def test_batch_titles_present(monkeypatch):
 
 
 async def test_invalid_json_raises(monkeypatch):
-    articles = make_articles(["http://example.com/1"])
+    articles = make_articles(["http://example.com/1", "http://example.com/2"])
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     with patch(
         "pipeline.clustering.anthropic.AsyncAnthropic", return_value=mock_client("not json {{{")
@@ -144,3 +144,43 @@ async def test_empty_batch_raises(monkeypatch):
     ):
         with pytest.raises(ValueError, match="empty URL list"):
             await cluster(articles)
+
+
+async def test_missing_title_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"urls": [urls[0]]},  # no title key
+        "batch_b": {"title": "B", "urls": [urls[1]]},
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="empty title"):
+            await cluster(articles)
+
+
+async def test_empty_title_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "   ", "urls": [urls[0]]},  # whitespace-only
+        "batch_b": {"title": "B", "urls": [urls[1]]},
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="empty title"):
+            await cluster(articles)
+
+
+async def test_fewer_than_two_articles_raises(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with pytest.raises(ValueError, match="at least 2 articles"):
+        await cluster([])
+    with pytest.raises(ValueError, match="at least 2 articles"):
+        await cluster(make_articles(["http://example.com/1"]))
