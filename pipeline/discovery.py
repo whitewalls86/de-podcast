@@ -8,7 +8,7 @@ import feedparser
 import httpx
 from dateutil import parser as dateutil_parser
 
-_HN_PARAMS = {"tags": "story", "query": "data engineering", "hitsPerPage": "30"}
+_HN_BASE_PARAMS = {"tags": "story", "query": "data engineering", "hitsPerPage": "30"}
 _RSS_TIMEOUT = 15
 _SNIPPET_MAX = 300
 
@@ -30,7 +30,7 @@ def _snippet(text: str | None) -> str:
 
 
 async def _fetch_rss(source: dict) -> list[dict]:
-    async with httpx.AsyncClient(timeout=_RSS_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=_RSS_TIMEOUT, follow_redirects=True) as client:
         r = await client.get(source["url"])
         r.raise_for_status()
         content = r.content
@@ -70,8 +70,10 @@ async def _fetch_rss(source: dict) -> list[dict]:
 
 
 async def _fetch_hn(source: dict) -> list[dict]:
+    cutoff_ts = int(_cutoff().timestamp())
+    params = {**_HN_BASE_PARAMS, "numericFilters": f"created_at_i>{cutoff_ts}"}
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(source["url"], params=_HN_PARAMS)
+        r = await client.get(source["url"], params=params)
         r.raise_for_status()
         data = r.json()
     results = []

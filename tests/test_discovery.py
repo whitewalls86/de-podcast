@@ -13,7 +13,7 @@ OLD = NOW - timedelta(hours=72)
 RSS_SOURCE = {"name": "Test RSS", "url": "http://example.com/feed", "type": "rss", "active": True}
 HN_SOURCE = {
     "name": "Hacker News",
-    "url": "https://hn.algolia.com/api/v1/search",
+    "url": "https://hn.algolia.com/api/v1/search_by_date",
     "type": "hn",
     "active": True,
 }
@@ -148,12 +148,54 @@ async def test_hn_skips_hits_without_url(tmp_path):
     assert articles == []
 
 
-async def test_hn_query_does_not_contain_literal_plus(tmp_path):
-    """Ensure the HN query string is 'data engineering', not 'data+engineering'."""
-    from pipeline.discovery import _HN_PARAMS
+async def test_hn_query_does_not_contain_literal_plus():
+    from pipeline.discovery import _HN_BASE_PARAMS
 
-    assert _HN_PARAMS["query"] == "data engineering"
-    assert "+" not in _HN_PARAMS["query"]
+    assert _HN_BASE_PARAMS["query"] == "data engineering"
+    assert "+" not in _HN_BASE_PARAMS["query"]
+
+
+async def test_hn_sends_numeric_filter_for_recent_stories(tmp_path):
+    p = write_sources(tmp_path, [HN_SOURCE])
+    captured_params: dict = {}
+
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"hits": []}
+
+    async def fake_get(url, params=None, **kwargs):
+        if params:
+            captured_params.update(params)
+        return resp
+
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get = fake_get
+
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=client):
+        await discover(p)
+
+    assert "numericFilters" in captured_params
+    filt = captured_params["numericFilters"]
+    assert filt.startswith("created_at_i>")
+    cutoff_ts = int(filt.split(">")[1])
+    expected_ts = int((NOW - timedelta(hours=48)).timestamp())
+    assert abs(cutoff_ts - expected_ts) < 5
+
+
+async def test_rss_client_follows_redirects(tmp_path):
+    p = write_sources(tmp_path, [RSS_SOURCE])
+    captured_kwargs: dict = {}
+
+    def client_factory(**kwargs):
+        captured_kwargs.update(kwargs)
+        return mock_rss_client()
+
+    with patch("pipeline.discovery.httpx.AsyncClient", side_effect=client_factory):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([])):
+            await discover(p)
+
+    assert captured_kwargs.get("follow_redirects") is True
 
 
 # --- 48h filter ---
