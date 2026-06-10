@@ -7,9 +7,20 @@ from types import SimpleNamespace
 import anthropic
 
 
-def _run_claude(prompt: str) -> subprocess.CompletedProcess:
+def _strip_fences(text: str) -> str:
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[: text.rfind("```")]
+    return text.strip()
+
+
+def _run_claude(prompt: str, model: str | None = None) -> subprocess.CompletedProcess:
+    cmd = ["claude", "-p", "--output-format", "json"]
+    if model:
+        cmd += ["--model", model]
     return subprocess.run(
-        ["claude", "-p", "--output-format", "json"],
+        cmd,
         input=prompt,
         shell=False,
         capture_output=True,
@@ -44,10 +55,12 @@ def _log_usage(usage: dict) -> None:
 
 
 class _Messages:
-    async def create(self, *, system: str = "", messages: list[dict], **kwargs) -> object:
+    async def create(
+        self, *, model: str = "", system: str = "", messages: list[dict], **kwargs
+    ) -> object:
         prompt = f"{system}\n\n{messages[0]['content']}" if system else messages[0]["content"]
         try:
-            result = await asyncio.to_thread(_run_claude, prompt)
+            result = await asyncio.to_thread(_run_claude, prompt, model or None)
         except FileNotFoundError:
             raise FileNotFoundError(
                 "claude CLI not found — install Claude Code or ensure it is on PATH"
@@ -69,7 +82,7 @@ class _Messages:
         except json.JSONDecodeError as e:
             raise RuntimeError(f"claude CLI returned non-JSON output: {e}\nRaw: {raw!r}") from e
 
-        text = envelope.get("result", "").strip()
+        text = _strip_fences(envelope.get("result", ""))
         if not text:
             raise RuntimeError(f"claude CLI JSON missing 'result' field: {raw!r}")
 
