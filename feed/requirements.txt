@@ -1,0 +1,2 @@
+fastapi[standard]==0.115.12
+feedgen==1.0.0
