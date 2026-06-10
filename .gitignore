@@ -19,8 +19,9 @@ notebooklm_auth/
 # Docker
 .docker/
 
-# Local scripts
+# Local scripts (except committed smoke tests)
 scripts/
+!scripts/test_pipeline.py
 
 # Graphify local outputs
 graphify-out/
