@@ -341,7 +341,7 @@ de-podcast/
 │   ├── discovery.py
 │   ├── ranking.py
 │   ├── clustering.py
-│   ├── dev_client.py             # subprocess-backed Claude client for dev (see Dev Client)
+│   ├── dev_client.py             # planned: subprocess-backed Claude client for local dev
 │   ├── notebooklm_gen.py
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
@@ -357,7 +357,7 @@ de-podcast/
 │   └── main.py                   # FastAPI feed server
 │
 ├── scripts/
-│   └── test_pipeline.py          # manual end-to-end smoke test (uses dev client)
+│   └── test_pipeline.py          # planned: manual end-to-end smoke test (uses dev client)
 │
 └── tests/
     ├── test_discovery.py
@@ -373,6 +373,7 @@ de-podcast/
 ```bash
 # .env  (gitignored)
 ANTHROPIC_API_KEY=sk-ant-...
+USE_DEV_CLIENT=false              # local dev only; use Claude CLI instead of Anthropic API
 FEED_TOKEN=<random-string>
 HOST_LAN_IP=192.168.1.x       # Windows machine's LAN IP
 FEED_TITLE=DE Daily
@@ -383,6 +384,7 @@ N8N_PASSWORD=<password>
 ```bash
 # .env.example  (committed)
 ANTHROPIC_API_KEY=
+USE_DEV_CLIENT=false
 FEED_TOKEN=
 HOST_LAN_IP=
 FEED_TITLE=DE Daily
@@ -440,15 +442,31 @@ n8n and the pipeline container are on the same Docker network, so `http://pipeli
 
 ---
 
-## Dev Client (Claude CLI workaround)
+## Planned Dev Client (Claude CLI workaround)
 
-During early development, before loading Anthropic API credits, `ranking.py` and `clustering.py` can run against the Claude.ai subscription (via the `claude` CLI) instead of the paid API.
+During early development, before loading Anthropic API credits, `ranking.py` and `clustering.py` should be able to run against the Claude.ai subscription via the `claude` CLI instead of the paid API. This is a local development workaround, not the production path.
 
-**Toggle:** set `USE_DEV_CLIENT=true` in the environment. When unset or `false`, the normal `anthropic.AsyncAnthropic` client is used (prod path).
+**Toggle:** set `USE_DEV_CLIENT=true` in the local environment. When unset or `false`, the normal `anthropic.AsyncAnthropic` client is used. Do not enable this in Docker or n8n; containers should always use the Anthropic API client.
 
 **How it works (`pipeline/dev_client.py`):**
 
-`DevClient` implements the same `client.messages.create(...)` interface as the Anthropic SDK. Instead of making an API call it shells out to `claude -p "<system>\n\n<user message>"`, captures stdout, and wraps it in a minimal response object so `ranking.py` and `clustering.py` see no difference.
+Add a small client factory, for example `get_anthropic_client()`, so `ranking.py` and `clustering.py` do not each read `USE_DEV_CLIENT` directly. In normal mode it returns `anthropic.AsyncAnthropic`. In dev mode it returns `DevClient`.
+
+`DevClient` implements only the SDK surface this project needs: `client.messages.create(...)` returning an object with `.content[0].text`. Instead of making an API call, it invokes the Claude CLI locally, captures stdout, and wraps it in that minimal response shape so `ranking.py` and `clustering.py` see no difference.
+
+Invoke the CLI without a shell so article text cannot break command parsing:
+
+```python
+subprocess.run(
+    ["claude", "-p", prompt],
+    shell=False,
+    capture_output=True,
+    text=True,
+    timeout=120,
+)
+```
+
+The implementation should raise clear errors when `claude` is not installed, exits nonzero, times out, or returns empty output.
 
 ```
 USE_DEV_CLIENT=true  →  DevClient (subprocess → claude CLI → Claude.ai subscription)
@@ -460,10 +478,11 @@ USE_DEV_CLIENT unset →  anthropic.AsyncAnthropic (Anthropic API → API credit
 - `claude -p` can add conversational framing around JSON; the existing response-shape validation in `rank()`/`cluster()` will catch and surface this as a clear error.
 - Subject to Claude.ai rate limits — not suitable for high-volume runs.
 - Not available inside Docker containers (no `claude` CLI installed there); dev mode is local only.
+- This avoids API billing during development, but it still uses model capacity through the logged-in Claude CLI account.
 
 **Smoke test script (`scripts/test_pipeline.py`):**
 
-Runs `discover()` → `rank()` → `cluster()` end-to-end against live sources and prints the results. Uses dev client by default. Not part of the automated test suite — intended for manual validation before committing API credits.
+Planned manual script that runs `discover()` → `rank()` → `cluster()` end-to-end against live sources and prints the results. It should set or require `USE_DEV_CLIENT=true` by default. Not part of the automated test suite — intended for local validation before committing API credits.
 
 ```bash
 USE_DEV_CLIENT=true python scripts/test_pipeline.py
