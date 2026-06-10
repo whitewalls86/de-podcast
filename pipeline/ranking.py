@@ -53,6 +53,13 @@ async def rank(articles: list[dict]) -> list[dict]:
             raise ValueError(
                 f"Claude ranking entry {i} 'score' must be a float in [0, 1]: {item!r}"
             )
+        tags = item.get("topic_tags")
+        if tags is not None and (
+            not isinstance(tags, list) or not all(isinstance(t, str) for t in tags)
+        ):
+            raise ValueError(
+                f"Claude ranking entry {i} 'topic_tags' must be an array of strings: {item!r}"
+            )
 
     score_map = {item["url"]: item for item in scores}
 

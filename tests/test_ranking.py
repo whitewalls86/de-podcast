@@ -192,6 +192,28 @@ async def test_score_below_0_raises(monkeypatch):
             await rank(articles)
 
 
+async def test_topic_tags_as_string_raises(monkeypatch):
+    articles = make_articles(1)
+    scores = [{"url": articles[0]["url"], "score": 0.8, "topic_tags": "dbt"}]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        with pytest.raises(ValueError, match="array of strings"):
+            await rank(articles)
+
+
+async def test_topic_tags_with_non_string_elements_raises(monkeypatch):
+    articles = make_articles(1)
+    scores = [{"url": articles[0]["url"], "score": 0.8, "topic_tags": ["dbt", 42]}]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.ranking.anthropic.AsyncAnthropic", return_value=mock_client(json.dumps(scores))
+    ):
+        with pytest.raises(ValueError, match="array of strings"):
+            await rank(articles)
+
+
 async def test_score_as_bool_raises(monkeypatch):
     articles = make_articles(1)
     # True is int subclass with value 1, which would pass a plain numeric check

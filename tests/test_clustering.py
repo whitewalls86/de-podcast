@@ -90,6 +90,38 @@ async def test_wrong_top_level_type_raises(monkeypatch):
             await cluster(articles)
 
 
+async def test_urls_not_a_list_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": {"http://example.com/1": True}},  # dict, not list
+        "batch_b": {"title": "B", "urls": [urls[1]]},
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="list of strings"):
+            await cluster(articles)
+
+
+async def test_urls_with_non_string_elements_raises(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": [urls[0], 42]},
+        "batch_b": {"title": "B", "urls": [urls[1]]},
+    }
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with patch(
+        "pipeline.clustering.anthropic.AsyncAnthropic",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        with pytest.raises(ValueError, match="list of strings"):
+            await cluster(articles)
+
+
 async def test_batch_value_not_dict_raises(monkeypatch):
     urls = ["http://example.com/1", "http://example.com/2"]
     articles = make_articles(urls)
