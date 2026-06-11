@@ -504,8 +504,19 @@ N8N_PASSWORD=
 **Nodes:**
 1. `Cron` → fires at 6am
 2. `HTTP Request` → POST `http://pipeline:8001/pipeline/run`
-3. `IF` → check response status
-4. `Send Email` / `Slack` (on failure) → notify of pipeline error
+3. `IF` → check `{{ $json.status }}` is not `"success"` and not `"noop"`
+4. `Send Email` / `Slack` (on failure) → notify of pipeline error, include `{{ $json.status }}` in message body
+
+**Response status field values:**
+
+| `status` | HTTP | Meaning |
+|---|---|---|
+| `"success"` | 200 | Both episodes generated — normal run |
+| `"noop"` | 200 | Fewer than 2 ranked articles — nothing to publish |
+| `"partial"` | 200 | At least one episode generated, at least one failed — worth alerting |
+| `"failed"` | 500 | All generation attempts failed — n8n HTTP node flags this automatically |
+
+n8n's HTTP Request node treats any non-2xx as an error automatically. `partial` returns 200, so the IF node must check `body.status` to catch it — use condition `{{ $json.status !== "success" && $json.status !== "noop" }}` to route to the alert branch.
 
 n8n and the pipeline container are on the same Docker network, so `http://pipeline:8001` resolves via Docker DNS.
 
