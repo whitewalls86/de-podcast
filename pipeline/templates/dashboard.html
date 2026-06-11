@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Pipeline Admin{% endblock %}
+{% block content %}
+<h1>Pipeline Dashboard</h1>
+
+<section>
+  <h2>Last Run</h2>
+  {% if last_run %}
+  <p>
+    <strong>Time:</strong> {{ last_run.timestamp }}<br>
+    <strong>Status:</strong> <span class="badge badge-{{ last_run.status }}">{{ last_run.status }}</span><br>
+    <strong>Batches:</strong> {{ last_run.batches | join(", ") or "none" }}
+  </p>
+  {% else %}
+  <p>No runs recorded yet.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Auth Status</h2>
+  <p>
+    <span class="badge badge-{{ auth.status }}">{{ auth.status }}</span>
+    {% if auth.checked_at %} — last checked {{ auth.checked_at }}{% endif %}
+  </p>
+</section>
+
+<section>
+  <h2>Today's Episodes</h2>
+  <p><em>Episode list coming in a future step.</em></p>
+</section>
+{% endblock %}

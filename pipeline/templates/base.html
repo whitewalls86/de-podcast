@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Pipeline Admin{% endblock %}</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    nav a { margin-right: 1rem; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+    th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
+    form label { display: block; margin-bottom: 0.5rem; }
+    .badge { padding: 0.2rem 0.5rem; border-radius: 3px; font-size: 0.85rem; }
+    .badge-success { background: #d4edda; color: #155724; }
+    .badge-partial { background: #fff3cd; color: #856404; }
+    .badge-failed { background: #f8d7da; color: #721c24; }
+    .badge-noop, .badge-unknown { background: #e2e3e5; color: #383d41; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/admin">Dashboard</a>
+    <a href="/admin/sources">Sources</a>
+    <a href="/admin/feedback">Feedback</a>
+  </nav>
+  <hr>
+  {% block content %}{% endblock %}
+</body>
+</html>
