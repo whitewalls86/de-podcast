@@ -12,15 +12,18 @@ import httpx
 from pipeline.clustering import cluster
 from pipeline.discovery import discover
 from pipeline.feedback import DEFAULT_FEEDBACK
+from pipeline.pinned import clear_consumed, load_pinned
 from pipeline.ranking import rank
+from pipeline.topic import load_topic
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SOURCES = Path("sources.json")
 _DEFAULT_SEEN = Path("data/seen_urls.json")
 _DEFAULT_LAST_RUN = Path("data/last_run.json")
+_DEFAULT_PINNED = Path("data/pinned_urls.json")
 
-GenerateFn = Callable[[str, str, list[str]], Awaitable[tuple[str, list[str]]]]
+GenerateFn = Callable[[str, str, list[str], dict], Awaitable[tuple[str, list[str]]]]
 
 
 async def _post_to_feed(
@@ -99,12 +102,29 @@ def _write_last_run(path: Path, result: dict[str, Any]) -> None:
     )
 
 
+def _merge_pinned(pinned_articles: list[dict], ranked: list[dict]) -> list[dict]:
+    """Combine pinned + ranked, pinned first, dedup by URL, cap at 10.
+
+    Pinned entries always win on URL collision — the ranked version is dropped —
+    so the pinned dict (score=1.0, source='Pinned') is the one that reaches cluster().
+    """
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for a in pinned_articles + ranked:
+        if a["url"] not in seen:
+            seen.add(a["url"])
+            merged.append(a)
+    return merged[:10]
+
+
 async def run_pipeline(
     *,
     sources_path: Path = _DEFAULT_SOURCES,
     seen_path: Path = _DEFAULT_SEEN,
     last_run_path: Path = _DEFAULT_LAST_RUN,
     feedback_path: Path = DEFAULT_FEEDBACK,
+    topic_path: Path = Path("topic.json"),
+    pinned_path: Path = _DEFAULT_PINNED,
     generate_fn: GenerateFn | None = None,
 ) -> dict[str, Any]:
     if generate_fn is None:
@@ -112,20 +132,44 @@ async def run_pipeline(
 
         generate_fn = generate_episode
 
+    topic = load_topic(topic_path)
     seen_urls = _load_seen(seen_path)
 
-    articles = await discover(sources_path)
-    articles = [a for a in articles if a["url"] not in seen_urls]
+    raw_pinned = load_pinned(pinned_path)
+    pinned_articles = [
+        {
+            "url": e["url"],
+            "title": e["title"],
+            "source": "Pinned",
+            "published_at": datetime.now(UTC),
+            "snippet": "",
+            "score": 1.0,
+            "topic_tags": ["pinned"],
+            "reason": "Pinned by user",
+        }
+        for e in raw_pinned
+    ]
+    pinned_urls = {a["url"] for a in pinned_articles}
 
-    ranked = await rank(articles, feedback_path=feedback_path)
+    articles = await discover(sources_path, hn_query=topic["hn_query"])
+    # Seen-filter: pinned URLs bypass the seen filter (they are force-added)
+    articles = [a for a in articles if a["url"] not in seen_urls and a["url"] not in pinned_urls]
 
-    if len(ranked) < 2:
-        logger.info("Only %d ranked article(s) after dedup — skipping clustering", len(ranked))
+    ranked = await rank(articles, feedback_path=feedback_path, topic=topic)
+
+    # Pinned entries skip scoring; merge them in, pinned first, then cap at 10
+    candidates = _merge_pinned(pinned_articles, ranked)
+
+    if len(candidates) < 2:
+        # A single pinned URL with no other articles still can't form 2 batches — noop is correct.
+        logger.info(
+            "Only %d candidate(s) after pinned merge — skipping clustering", len(candidates)
+        )
         result = {"status": "noop", "batches": [], "articles_seen": 0}
         _write_last_run(last_run_path, result)
         return result
 
-    clusters = await cluster(ranked)
+    clusters = await cluster(candidates, topic=topic)
 
     _raw_mb = os.environ.get("MAX_BATCHES", "0")
     try:
@@ -135,16 +179,18 @@ async def run_pipeline(
     if max_batches:
         clusters = dict(list(clusters.items())[:max_batches])
 
-    # Build a URL → tags lookup from ranked articles so each batch inherits
+    # Build a URL → tags lookup from all candidates so each batch inherits
     # the union of its constituent articles' topic tags.
-    url_tags: dict[str, list[str]] = {a["url"]: a.get("topic_tags", []) for a in ranked}
+    url_tags: dict[str, list[str]] = {a["url"]: a.get("topic_tags", []) for a in candidates}
 
     today_utc = datetime.now(UTC).strftime("%Y-%m-%d")
     batches = []
     seen_to_add: set[str] = set()
     for batch_key, batch in clusters.items():
         try:
-            mp3_path, consumed_urls = await generate_fn(batch_key, batch["title"], batch["urls"])
+            mp3_path, consumed_urls = await generate_fn(
+                batch_key, batch["title"], batch["urls"], topic
+            )
             episode_id = f"{_slugify(batch['title'])}-{today_utc}"
             batch_tags = sorted({t for url in consumed_urls for t in url_tags.get(url, [])})
             await _post_to_feed(
@@ -162,6 +208,9 @@ async def run_pipeline(
 
     if seen_to_add:
         _save_seen(seen_path, seen_urls | seen_to_add)
+        # Pinned URLs clear only when actually consumed by NotebookLM — same semantics as seen-URLs.
+        # A pinned URL skipped by NotebookLM stays pinned and is retried next run.
+        clear_consumed(seen_to_add, path=pinned_path)
 
     if not batches:
         status = "failed"

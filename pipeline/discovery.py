@@ -8,7 +8,7 @@ import feedparser
 import httpx
 from dateutil import parser as dateutil_parser
 
-_HN_BASE_PARAMS = {"tags": "story", "query": "data engineering", "hitsPerPage": "30"}
+_HN_BASE_PARAMS = {"tags": "story", "hitsPerPage": "30"}
 _RSS_TIMEOUT = 15
 _SNIPPET_MAX = 300
 
@@ -69,9 +69,9 @@ async def _fetch_rss(source: dict) -> list[dict]:
     return results
 
 
-async def _fetch_hn(source: dict) -> list[dict]:
+async def _fetch_hn(source: dict, *, hn_query: str) -> list[dict]:
     cutoff_ts = int(_cutoff().timestamp())
-    params = {**_HN_BASE_PARAMS, "numericFilters": f"created_at_i>{cutoff_ts}"}
+    params = {**_HN_BASE_PARAMS, "query": hn_query, "numericFilters": f"created_at_i>{cutoff_ts}"}
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(source["url"], params=params)
         r.raise_for_status()
@@ -100,7 +100,7 @@ async def _fetch_hn(source: dict) -> list[dict]:
     return results
 
 
-async def discover(sources_path: Path) -> list[dict]:
+async def discover(sources_path: Path, *, hn_query: str = "data engineering") -> list[dict]:
     sources = json.loads(sources_path.read_text())
     active = [s for s in sources if s.get("active", True)]
 
@@ -109,7 +109,7 @@ async def discover(sources_path: Path) -> list[dict]:
         if source["type"] == "rss":
             tasks.append(_fetch_rss(source))
         elif source["type"] == "hn":
-            tasks.append(_fetch_hn(source))
+            tasks.append(_fetch_hn(source, hn_query=hn_query))
 
     results_per_source = await asyncio.gather(*tasks, return_exceptions=True)
 

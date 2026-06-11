@@ -24,9 +24,11 @@ def _episodes_dir() -> Path:
     return Path(os.environ.get("EPISODES_DIR", "/app/episodes"))
 
 
-async def _generate_once(title: str, urls: list[str], dest: Path) -> tuple[str, list[str]]:
+async def _generate_once(
+    title: str, urls: list[str], dest: Path, topic: dict
+) -> tuple[str, list[str]]:
     async with NotebookLMClient.from_storage() as client:
-        nb = await client.notebooks.create(f"DE Daily - {title}")
+        nb = await client.notebooks.create(f"{topic['short_name']} - {title}")
         try:
             consumed: list[str] = []
             for url in urls:
@@ -39,7 +41,7 @@ async def _generate_once(title: str, urls: list[str], dest: Path) -> tuple[str, 
                 raise RuntimeError("No sources could be added to the notebook")
             status = await client.artifacts.generate_audio(
                 nb.id,
-                instructions=f"Practical data engineering techniques. Topic: {title}",
+                instructions=f"{topic['generation_instructions']} Topic: {title}",
             )
             await asyncio.wait_for(
                 client.artifacts.wait_for_completion(nb.id, status.task_id, timeout=_TIMEOUT_S),
@@ -51,7 +53,9 @@ async def _generate_once(title: str, urls: list[str], dest: Path) -> tuple[str, 
             await client.notebooks.delete(nb.id)
 
 
-async def generate_episode(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
+async def generate_episode(
+    batch_key: str, title: str, urls: list[str], topic: dict
+) -> tuple[str, list[str]]:
     """Create an ephemeral NotebookLM notebook, generate the audio overview,
     download it to EPISODES_DIR, and delete the notebook.
     Returns (mp3_path, consumed_urls) where consumed_urls are those NotebookLM
@@ -63,7 +67,7 @@ async def generate_episode(batch_key: str, title: str, urls: list[str]) -> tuple
     last_exc: Exception | None = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            return await _generate_once(title, urls, dest)
+            return await _generate_once(title, urls, dest, topic)
         except (ArtifactInProgressTimeoutError, TimeoutError):
             raise  # timeout = generation started but took too long; retrying wastes a credit
         except Exception as exc:  # noqa: BLE001 - retried below, re-raised after last attempt

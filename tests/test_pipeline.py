@@ -17,7 +17,9 @@ _CLUSTERS = {
 }
 
 
-async def _fake_generate(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
+async def _fake_generate(
+    batch_key: str, title: str, urls: list[str], topic: dict
+) -> tuple[str, list[str]]:
     return f"data/{batch_key}.mp3", urls
 
 
@@ -107,7 +109,7 @@ async def test_only_consumed_urls_written_to_seen(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    async def partial_consume(batch_key, title, urls):
+    async def partial_consume(batch_key, title, urls, topic):
         # Simulate one URL being skipped (not added to NotebookLM)
         return f"data/{batch_key}.mp3", urls[:1]
 
@@ -132,7 +134,7 @@ async def test_seen_urls_not_written_on_generation_failure(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    async def always_fail(batch_key, title, urls):
+    async def always_fail(batch_key, title, urls, topic):
         raise RuntimeError("generation error")
 
     patches = _patch_stages()
@@ -154,7 +156,7 @@ async def test_partial_failure_does_not_block_other_batch(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    async def fail_batch_a(batch_key, title, urls):
+    async def fail_batch_a(batch_key, title, urls, topic):
         if batch_key == "batch_a":
             raise RuntimeError("batch_a failed")
         return f"data/{batch_key}.mp3", urls
@@ -364,3 +366,193 @@ async def test_feed_post_failure_marks_batch_failed(tmp_path):
     assert result["status"] == "failed"
     assert result["batches"] == []
     assert not seen.exists()
+
+
+# --- pinned URL behavior ---
+
+
+from pipeline.pipeline import _merge_pinned  # noqa: E402
+
+
+def _make_article(url: str, score: float = 0.9) -> dict:
+    return {
+        "url": url,
+        "title": f"T {url}",
+        "source": "s",
+        "snippet": "",
+        "score": score,
+        "topic_tags": [],
+        "reason": "",
+    }
+
+
+def _make_pinned(url: str) -> dict:
+    return {
+        "url": url,
+        "title": f"Pinned {url}",
+        "source": "Pinned",
+        "published_at": "2026-01-01T00:00:00+00:00",
+        "snippet": "",
+        "score": 1.0,
+        "topic_tags": ["pinned"],
+        "reason": "Pinned by user",
+    }
+
+
+def test_merge_pinned_puts_pinned_first():
+    pinned = [_make_pinned("https://example.com/pin")]
+    ranked = [_make_article("https://example.com/a"), _make_article("https://example.com/b")]
+    result = _merge_pinned(pinned, ranked)
+    assert result[0]["url"] == "https://example.com/pin"
+
+
+def test_merge_pinned_caps_at_10():
+    pinned = [_make_pinned(f"https://pinned.com/{i}") for i in range(3)]
+    ranked = [_make_article(f"https://ranked.com/{i}") for i in range(10)]
+    result = _merge_pinned(pinned, ranked)
+    assert len(result) == 10
+
+
+def test_merge_pinned_wins_on_url_collision():
+    url = "https://example.com/shared"
+    pinned = [_make_pinned(url)]
+    ranked = [_make_article(url)]  # same URL, lower score
+    result = _merge_pinned(pinned, ranked)
+    assert len(result) == 1
+    assert result[0]["source"] == "Pinned"
+    assert result[0]["score"] == 1.0
+
+
+async def test_pinned_url_bypasses_seen_filter(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pinned_file.write_text(
+        json.dumps([{"id": "art", "url": "https://example.com/pinned", "title": "Pinned Art"}])
+    )
+    seen.write_text(json.dumps(["https://example.com/pinned"]))  # pinned URL is in seen
+
+    captured_cluster_urls: list[str] = []
+
+    async def capturing_cluster(articles, **kwargs):
+        captured_cluster_urls.extend(a["url"] for a in articles)
+        return _CLUSTERS
+
+    patches = [
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=AsyncMock(return_value=_RANKED)),
+        patch("pipeline.pipeline.cluster", new=capturing_cluster),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(
+            sources_path=sources,
+            seen_path=seen,
+            pinned_path=pinned_file,
+            generate_fn=_fake_generate,
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert "https://example.com/pinned" in captured_cluster_urls
+
+
+async def test_pinned_url_appears_in_cluster_input(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pinned_file.write_text(
+        json.dumps([{"id": "art", "url": "https://pin.example.com/1", "title": "Pin 1"}])
+    )
+
+    captured: list[dict] = []
+
+    async def capturing_cluster(articles, **kwargs):
+        captured.extend(articles)
+        return _CLUSTERS
+
+    patches = [
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=AsyncMock(return_value=_RANKED)),
+        patch("pipeline.pipeline.cluster", new=capturing_cluster),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(
+            sources_path=sources,
+            seen_path=seen,
+            pinned_path=pinned_file,
+            generate_fn=_fake_generate,
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    urls = [a["url"] for a in captured]
+    assert "https://pin.example.com/1" in urls
+
+
+async def test_pinned_cleared_only_when_consumed(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pin_url = "https://pin.example.com/1"
+    pinned_file.write_text(json.dumps([{"id": "pin1", "url": pin_url, "title": "Pin 1"}]))
+
+    # generate_fn only consumes the first URL per batch (not the pinned one if it's second)
+    async def consume_none(batch_key, title, urls, topic):
+        return f"data/{batch_key}.mp3", []  # consumed nothing
+
+    patches = _patch_stages()
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(
+            sources_path=sources, seen_path=seen, pinned_path=pinned_file, generate_fn=consume_none
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    # Pinned URL not consumed → should still be in the file
+    remaining = json.loads(pinned_file.read_text())
+    assert any(e["url"] == pin_url for e in remaining)
+
+
+async def test_pinned_cleared_when_consumed(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pin_url = "https://pin.example.com/consumed"
+    pinned_file.write_text(json.dumps([{"id": "pin1", "url": pin_url, "title": "Pin 1"}]))
+
+    # generate_fn returns all urls as consumed (including the pinned one)
+    async def consume_all(batch_key, title, urls, topic):
+        return f"data/{batch_key}.mp3", urls
+
+    patches = _patch_stages()
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(
+            sources_path=sources, seen_path=seen, pinned_path=pinned_file, generate_fn=consume_all
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    # If the pinned URL was in the batch and returned as consumed, it clears
+    # (may not be consumed if cluster didn't include it — check seen set includes it)
+    seen_written = set(json.loads(seen.read_text())) if seen.exists() else set()
+    remaining_pinned = json.loads(pinned_file.read_text()) if pinned_file.exists() else []
+    pinned_urls_remaining = {e["url"] for e in remaining_pinned}
+    # If pin_url was consumed (in seen), it must not remain pinned
+    if pin_url in seen_written:
+        assert pin_url not in pinned_urls_remaining

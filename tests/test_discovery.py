@@ -148,11 +148,33 @@ async def test_hn_skips_hits_without_url(tmp_path):
     assert articles == []
 
 
-async def test_hn_query_does_not_contain_literal_plus():
+async def test_hn_base_params_has_no_hardcoded_query():
     from pipeline.discovery import _HN_BASE_PARAMS
 
-    assert _HN_BASE_PARAMS["query"] == "data engineering"
-    assert "+" not in _HN_BASE_PARAMS["query"]
+    assert "query" not in _HN_BASE_PARAMS
+
+
+async def test_hn_query_reaches_request_params(tmp_path):
+    p = write_sources(tmp_path, [HN_SOURCE])
+    captured_params: dict = {}
+
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"hits": []}
+
+    async def fake_get(url, params=None, **kwargs):
+        if params:
+            captured_params.update(params)
+        return resp
+
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get = fake_get
+
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=client):
+        await discover(p, hn_query="world news")
+
+    assert captured_params.get("query") == "world news"
 
 
 async def test_hn_sends_numeric_filter_for_recent_stories(tmp_path):

@@ -3,20 +3,25 @@ from pathlib import Path
 
 from pipeline.dev_client import get_anthropic_client
 from pipeline.feedback import DEFAULT_FEEDBACK, build_few_shot_context
+from pipeline.topic import DEFAULT_TOPIC
 
 _MODEL = "claude-haiku-4-5-20251001"
 
-_SYSTEM = """\
-You are a data engineering content curator. Score each article from 0.0 to 1.0 based on:
-- Practical/technical depth (not opinion fluff)
-- Relevance to: Snowflake, dbt, Spark, Databricks, Kafka, pipeline architecture,
-  data quality, orchestration
-- Novelty: new releases, new techniques, not rehashed basics
-- Source credibility
+_SYSTEM_TAIL = """\
 
 Return ONLY a JSON array. No commentary, no markdown fences, no explanation.
 Compact format: [{"url":"...","score":0.92,"topic_tags":["dbt","testing"]}, ...]
 """
+
+
+def build_system(topic: dict) -> str:
+    criteria_lines = "\n".join(f"- {c}" for c in topic["ranking_criteria"])
+    return (
+        f"You are a {topic['name']} content curator."
+        f" Score each article from 0.0 to 1.0 based on:\n"
+        f"{criteria_lines}"
+        f"{_SYSTEM_TAIL}"
+    )
 
 
 def build_ranking_prompt(articles: list[dict], few_shot_context: str) -> str:
@@ -27,7 +32,12 @@ def build_ranking_prompt(articles: list[dict], few_shot_context: str) -> str:
     return article_block
 
 
-async def rank(articles: list[dict], *, feedback_path: Path = DEFAULT_FEEDBACK) -> list[dict]:
+async def rank(
+    articles: list[dict],
+    *,
+    feedback_path: Path = DEFAULT_FEEDBACK,
+    topic: dict = DEFAULT_TOPIC,
+) -> list[dict]:
     if not articles:
         return []
 
@@ -38,7 +48,7 @@ async def rank(articles: list[dict], *, feedback_path: Path = DEFAULT_FEEDBACK) 
     response = await client.messages.create(
         model=_MODEL,
         max_tokens=4096,
-        system=_SYSTEM,
+        system=build_system(topic),
         messages=[{"role": "user", "content": user_msg}],
     )
 

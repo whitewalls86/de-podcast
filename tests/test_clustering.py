@@ -273,3 +273,29 @@ async def test_fewer_than_two_articles_raises():
         await cluster([])
     with pytest.raises(ValueError, match="at least 2 articles"):
         await cluster(make_articles(["http://example.com/1"]))
+
+
+# --- build_system ---
+
+from pipeline.clustering import build_system  # noqa: E402
+
+
+def test_build_system_includes_topic_name():
+    topic = {"name": "World Events"}
+    result = build_system(topic)
+    assert "World Events" in result
+
+
+async def test_cluster_passes_topic_name_to_system_prompt(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": [urls[0]]},
+        "batch_b": {"title": "B", "urls": [urls[1]]},
+    }
+    client = mock_client(json.dumps(cluster_result))
+    topic = {"name": "New Car"}
+    with patch("pipeline.clustering.get_anthropic_client", return_value=client):
+        await cluster(articles, topic=topic)
+    call_kwargs = client.messages.create.call_args.kwargs
+    assert "New Car" in call_kwargs["system"]

@@ -11,6 +11,7 @@ services:
       - pipeline_data:/app/data
       - notebooklm_auth:/root/.notebooklm
       - ./config/sources.json:/app/sources.json
+      - ./config/topic.json:/app/topic.json
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FEED_TOKEN=${FEED_TOKEN}
