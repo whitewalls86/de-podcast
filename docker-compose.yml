@@ -8,6 +8,7 @@ services:
       - "6080:6080"
     volumes:
       - episodes:/app/episodes
+      - pipeline_data:/app/data
       - notebooklm_auth:/root/.notebooklm
       - ./config/sources.json:/app/sources.json
     environment:
@@ -41,5 +42,6 @@ services:
 
 volumes:
   episodes:
+  pipeline_data:
   notebooklm_auth:
   n8n_data:
