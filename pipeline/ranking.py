@@ -45,7 +45,9 @@ async def rank(articles: list[dict], *, feedback_path: Path = DEFAULT_FEEDBACK) 
     raw = response.content[0].text.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1]
-        raw = raw[: raw.rfind("```")].strip()
+        end = raw.rfind("```")
+        if end != -1:
+            raw = raw[:end].strip()
     try:
         scores = json.loads(raw)
     except json.JSONDecodeError as e:

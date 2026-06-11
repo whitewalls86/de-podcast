@@ -39,7 +39,9 @@ async def cluster(articles: list[dict]) -> dict:
     raw = response.content[0].text.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1]
-        raw = raw[: raw.rfind("```")].strip()
+        end = raw.rfind("```")
+        if end != -1:
+            raw = raw[:end].strip()
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as e:
