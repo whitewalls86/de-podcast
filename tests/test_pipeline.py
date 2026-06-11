@@ -45,6 +45,7 @@ async def test_result_shape(tmp_path):
         for p in patches:
             p.stop()
 
+    assert result["status"] == "success"
     assert "batches" in result
     assert "articles_seen" in result
     assert len(result["batches"]) == 2
@@ -117,6 +118,7 @@ async def test_seen_urls_not_written_on_generation_failure(tmp_path):
             p.stop()
 
     assert not seen.exists()
+    assert result["status"] == "failed"
     assert result["batches"] == []
 
 
@@ -139,6 +141,7 @@ async def test_partial_failure_does_not_block_other_batch(tmp_path):
         for p in patches:
             p.stop()
 
+    assert result["status"] == "partial"
     assert len(result["batches"]) == 1
     assert result["batches"][0]["title"] == "Batch"
     # only URLs from the successful batch should be marked seen
@@ -167,7 +170,7 @@ async def test_fewer_than_two_ranked_returns_no_op(tmp_path):
         for p in patches:
             p.stop()
 
-    assert result == {"batches": [], "articles_seen": 0}
+    assert result == {"status": "noop", "batches": [], "articles_seen": 0}
     assert not seen.exists()
 
 

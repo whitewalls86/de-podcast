@@ -36,7 +36,7 @@ Pocket Casts and Overcast render episode descriptions. You tap directly from the
 ]
 ```
 
-Stored at `/app/feedback.json` inside the pipeline container, on the `notebooklm_auth` volume so it persists across restarts.
+Stored at `/app/data/feedback.json` inside the pipeline container, on the `pipeline_data` volume so it persists across restarts.
 
 ### Ranker prompt injection
 

@@ -47,7 +47,7 @@ async def run_pipeline(
 
     if len(ranked) < 2:
         logger.info("Only %d ranked article(s) after dedup — skipping clustering", len(ranked))
-        return {"batches": [], "articles_seen": 0}
+        return {"status": "noop", "batches": [], "articles_seen": 0}
 
     clusters = await cluster(ranked)
 
@@ -66,4 +66,11 @@ async def run_pipeline(
     if seen_to_add:
         _save_seen(seen_path, seen_urls | seen_to_add)
 
-    return {"batches": batches, "articles_seen": len(seen_to_add)}
+    if not batches:
+        status = "failed"
+    elif len(batches) < len(clusters):
+        status = "partial"
+    else:
+        status = "success"
+
+    return {"status": status, "batches": batches, "articles_seen": len(seen_to_add)}
