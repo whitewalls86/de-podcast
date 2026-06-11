@@ -72,6 +72,7 @@ services:
       - FEED_TOKEN=${FEED_TOKEN}
       - FEED_TITLE=${FEED_TITLE:-DE Daily}
       - FEED_HOST=http://${HOST_LAN_IP}:8000
+      - PIPELINE_HOST=http://${HOST_LAN_IP}:8001
 
   n8n:
     image: n8nio/n8n
@@ -294,8 +295,8 @@ description = f"""
 
 ---
 Was this episode useful?
-👍 Yes: {FEED_HOST}/feedback/{episode.id}?vote=up
-👎 No: {FEED_HOST}/feedback/{episode.id}?vote=down
+👍 Yes: {PIPELINE_HOST}/feedback/{episode.id}?vote=up
+👎 No: {PIPELINE_HOST}/feedback/{episode.id}?vote=down
 """
 ```
 
