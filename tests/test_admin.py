@@ -94,6 +94,20 @@ def test_delete_source(client, admin_paths):
     )
 
 
+def test_add_source_empty_name_returns_422(client):
+    r = client.post(
+        "/admin/sources", data={"name": "!!!", "url": "https://x.com/rss", "type": "rss"}
+    )
+    assert r.status_code == 422
+
+
+def test_add_source_invalid_type_returns_422(client):
+    r = client.post(
+        "/admin/sources", data={"name": "Feed", "url": "https://x.com/rss", "type": "atom"}
+    )
+    assert r.status_code == 422
+
+
 def test_delete_source_missing_returns_404(client):
     r = client.delete("/admin/sources/nonexistent")
     assert r.status_code == 404

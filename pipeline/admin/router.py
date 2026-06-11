@@ -41,7 +41,10 @@ async def add_source_route(
     url: str = Form(...),
     type: str = Form(...),
 ):
-    add_source(name, url, type, path=request.app.state.sources_path)
+    try:
+        add_source(name, url, type, path=request.app.state.sources_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     return RedirectResponse(url="/admin/sources", status_code=303)
 
 

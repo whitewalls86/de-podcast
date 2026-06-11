@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 _DEFAULT_SOURCES = Path("sources.json")
+_VALID_TYPES = {"rss", "hn"}
 
 
 def _slugify(name: str) -> str:
@@ -37,11 +38,17 @@ def list_sources(path: Path = _DEFAULT_SOURCES) -> list[dict]:
 
 
 def add_source(name: str, url: str, type: str, *, path: Path = _DEFAULT_SOURCES) -> dict:
+    if type not in _VALID_TYPES:
+        raise ValueError(f"Invalid source type {type!r}; must be one of {_VALID_TYPES}")
     sources = _load(path)
     for s in sources:
         if s["url"] == url:
             return s
     base = _slugify(name)
+    if not base:
+        raise ValueError(
+            f"Name {name!r} produces an empty slug; use at least one alphanumeric character"
+        )
     existing_ids = {s["id"] for s in sources}
     sid = base
     n = 1

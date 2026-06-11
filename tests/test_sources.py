@@ -81,3 +81,18 @@ def test_toggle(sources_file):
 def test_toggle_missing_raises(sources_file):
     with pytest.raises(KeyError):
         toggle_source("nonexistent", path=sources_file)
+
+
+def test_add_empty_slug_raises(tmp_path):
+    with pytest.raises(ValueError, match="empty slug"):
+        add_source("!!!", "https://example.com/rss", "rss", path=tmp_path / "sources.json")
+
+
+def test_add_whitespace_name_raises(tmp_path):
+    with pytest.raises(ValueError, match="empty slug"):
+        add_source("   ", "https://example.com/rss", "rss", path=tmp_path / "sources.json")
+
+
+def test_add_invalid_type_raises(tmp_path):
+    with pytest.raises(ValueError, match="Invalid source type"):
+        add_source("Feed", "https://example.com/rss", "atom", path=tmp_path / "sources.json")
