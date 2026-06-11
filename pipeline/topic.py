@@ -37,7 +37,11 @@ def validate_topic(data: dict) -> dict:
         raise ValueError("topic.json field 'ranking_criteria': must be a list of strings")
     if not all(isinstance(c, str) for c in criteria):
         raise ValueError("topic.json field 'ranking_criteria': must be a list of strings")
-    stripped = [c.strip() for c in criteria if c.strip()]
+    if not all(c.strip() for c in criteria):
+        raise ValueError(
+            "topic.json field 'ranking_criteria': must contain at least one non-empty string"
+        )
+    stripped = [c.strip() for c in criteria]
     if not stripped:
         raise ValueError(
             "topic.json field 'ranking_criteria': must contain at least one non-empty string"
