@@ -141,9 +141,5 @@ CI runs both on PRs and on pushes to `master`/`implementation` (integration job 
 
 ## Cost
 
-| Component | Cost |
-|-----------|------|
-| Claude Haiku (ranking + clustering) | ~$0.03/month |
-| NotebookLM audio generation | $0 (free tier) |
-| Infrastructure | $0 (local Docker) |
-| **Total** | **~$0.03/month** |
+~$0.20/month (Claude Haiku for ranking/clustering; everything else free).
+Measured: ~$0.005/run on a typical day (ranking ~1,400 input + ~500 output tokens; clustering ~400 input + ~170 output tokens).

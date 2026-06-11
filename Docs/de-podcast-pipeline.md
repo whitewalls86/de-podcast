@@ -570,7 +570,7 @@ CI (`.github/workflows/ci.yml`) runs both: the unit job has no external dependen
 
 | Component | Cost |
 |---|---|
-| Claude Haiku (ranking + clustering) | ~$0.03/month |
+| Claude Haiku (ranking + clustering) | ~$0.20/month (~$0.005/run) |
 | NotebookLM audio generation | $0 (free tier) |
 | Infrastructure | $0 (local Docker) |
 | **Total** | **~$0.03/month** |
