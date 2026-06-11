@@ -6,9 +6,20 @@ The goal is to prove the entire stack works end-to-end in Docker: real container
 
 ## Phase 1 — Pre-flight
 
+### 1a — Environment validation
+
+Before starting any containers, verify `.env` has all required values (copy from `.env.example` if starting fresh):
+
+- [ ] `ANTHROPIC_API_KEY` is set — ranking and clustering will fail without it
+- [ ] `FEED_TOKEN` is set to a non-empty string — pipeline-to-feed POST auth will fail otherwise
+- [ ] `HOST_LAN_IP` is set to the Windows machine's LAN IP (`ipconfig` → IPv4) — feed and feedback URLs in the running containers will be wrong if missing
+- [ ] `N8N_PASSWORD` is set — n8n UI will be inaccessible otherwise
+
+### 1b — Build and start
+
 - [ ] `docker compose --profile pipeline build` — verify all images build cleanly (no missing deps, no Dockerfile errors)
-- [ ] `docker compose --profile pipeline up -d` — all 4 containers start (`feed`, `pipeline`, `n8n`, any dependencies)
-- [ ] `docker compose ps` — all containers show healthy/running, no restart loops
+- [ ] `docker compose --profile pipeline up -d` — all 3 services start (`feed`, `pipeline`, `n8n`)
+- [ ] `docker compose ps` — all 3 services show as running, no restart loops
 - [ ] `curl http://localhost:8000/health` — feed responds
 - [ ] `curl http://localhost:8001/admin` — pipeline admin UI loads
 - [ ] `curl http://localhost:5678` — n8n UI is up
@@ -28,6 +39,7 @@ The goal is to prove the entire stack works end-to-end in Docker: real container
 
 ## Phase 3 — Pipeline Run (Step 6 proof)
 
+- [ ] Clear any stale deduplication state first — use the Admin UI **Clear Seen URLs** action, or: `docker compose exec pipeline sh -c "echo '[]' > /app/data/seen_urls.json"` — prevents a `noop` response if the volume already contains today's article URLs from a prior run
 - [ ] From admin UI or curl: `curl -X POST http://localhost:8001/pipeline/run`
 - [ ] Watch logs: `docker compose logs -f pipeline` — confirm discovery → ranking → clustering → NotebookLM notebook creation → audio generation → MP3 download → notebook deletion for both batches
 - [ ] Response body contains `{"status": "success"}` (or `"partial"` if one batch fails — investigate if so)
