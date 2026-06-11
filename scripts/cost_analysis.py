@@ -16,11 +16,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import anthropic
 
-from pipeline.clustering import _SYSTEM as CLUSTER_SYSTEM
+from pipeline.clustering import build_system as cluster_build_system
 from pipeline.discovery import discover
 from pipeline.feedback import DEFAULT_FEEDBACK, build_few_shot_context
 from pipeline.ranking import _MODEL, build_ranking_prompt
-from pipeline.ranking import _SYSTEM as RANK_SYSTEM
+from pipeline.ranking import build_system as rank_build_system
+from pipeline.topic import load_topic
+
+_TOPIC_PATH = Path(__file__).parent.parent / "config" / "topic.json"
 
 _INPUT_COST_PER_M = 1.00
 _OUTPUT_COST_PER_M = 5.00
@@ -56,9 +59,10 @@ async def main() -> None:
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
     sources_path = Path(__file__).parent.parent / "config" / "sources.json"
+    topic = load_topic(_TOPIC_PATH)
 
     print("Discovering articles...")
-    articles = await discover(sources_path)
+    articles = await discover(sources_path, hn_query=topic["hn_query"])
     print(f"  {len(articles)} articles discovered")
 
     print("\nRanking (real API call)...")
@@ -67,7 +71,7 @@ async def main() -> None:
     rank_response = await client.messages.create(
         model=_MODEL,
         max_tokens=4096,
-        system=RANK_SYSTEM,
+        system=rank_build_system(topic),
         messages=[{"role": "user", "content": rank_prompt}],
     )
     rank_cost = print_usage("ranking", rank_response.usage)
@@ -98,7 +102,7 @@ async def main() -> None:
     cluster_response = await client.messages.create(
         model=_MODEL,
         max_tokens=1024,
-        system=CLUSTER_SYSTEM,
+        system=cluster_build_system(topic),
         messages=[{"role": "user", "content": cluster_msg}],
     )
     cluster_cost = print_usage("clustering", cluster_response.usage)
