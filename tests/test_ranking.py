@@ -24,10 +24,8 @@ def mock_client(text: str):
     content_block.text = text
     response = MagicMock()
     response.content = [content_block]
-    messages = AsyncMock()
-    messages.create = AsyncMock(return_value=response)
     client = MagicMock()
-    client.messages = messages
+    client.messages.create = AsyncMock(return_value=response)
     return client
 
 

@@ -31,11 +31,16 @@ def _make_client():
     return client, nb
 
 
+async def _raise_timeout_after_closing(coro, *args, **kwargs):
+    coro.close()
+    raise TimeoutError()
+
+
 @contextmanager
 def _patch_client(client):
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=client)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = AsyncMock()
+    cm.__aenter__.return_value = client
+    cm.__aexit__.return_value = False
     with patch("pipeline.notebooklm_gen.NotebookLMClient") as MockClient:
         MockClient.from_storage.return_value = cm
         yield MockClient
@@ -96,7 +101,7 @@ async def test_timeout_raises_timeout_error(episodes_dir):
     with _patch_client(client):
         with patch(
             "pipeline.notebooklm_gen.asyncio.wait_for",
-            side_effect=TimeoutError(),
+            side_effect=_raise_timeout_after_closing,
         ):
             with pytest.raises(TimeoutError):
                 await generate_episode("batch_a", "Streaming", _URLS, _TOPIC)
@@ -117,7 +122,10 @@ async def test_asyncio_timeout_is_not_retried(episodes_dir):
     # asyncio.TimeoutError from the outer wait_for watchdog should also not retry.
     client, _ = _make_client()
     with _patch_client(client):
-        with patch("pipeline.notebooklm_gen.asyncio.wait_for", side_effect=TimeoutError()):
+        with patch(
+            "pipeline.notebooklm_gen.asyncio.wait_for",
+            side_effect=_raise_timeout_after_closing,
+        ):
             with pytest.raises(TimeoutError):
                 await generate_episode("batch_a", "Streaming", _URLS, _TOPIC)
     assert client.notebooks.create.await_count == 1  # no retry
