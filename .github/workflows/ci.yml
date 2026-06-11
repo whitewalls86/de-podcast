@@ -56,15 +56,14 @@ jobs:
       - name: Wait for feed and pipeline to be healthy
         run: |
           for i in $(seq 1 30); do
-            feed_ok=$(curl -sf http://localhost:8000/health && echo yes || echo no)
-            pipeline_ok=$(curl -sf http://localhost:8001/health && echo yes || echo no)
-            if [ "$feed_ok" = "yes" ] && [ "$pipeline_ok" = "yes" ]; then
+            if curl -sf http://localhost:8000/health && curl -sf http://localhost:8001/health; then
               echo "Services ready after $i attempts"
-              break
+              exit 0
             fi
-            echo "Attempt $i/30 — feed=$feed_ok pipeline=$pipeline_ok"
+            echo "Attempt $i/30 — not yet ready"
             sleep 3
           done
+          echo "Services did not become healthy in time" && exit 1
 
       - name: Wait for n8n to be reachable
         run: |
@@ -72,11 +71,12 @@ jobs:
             status=$(curl -o /dev/null -sw "%{http_code}" http://localhost:5678 || echo 000)
             if [ "$status" != "000" ]; then
               echo "n8n reachable (HTTP $status) after $i attempts"
-              break
+              exit 0
             fi
             echo "Attempt $i/20 — n8n not yet up"
             sleep 3
           done
+          echo "n8n did not become reachable in time" && exit 1
 
       - name: Run integration tests
         env:
