@@ -69,7 +69,9 @@ async def toggle_source_route(id: str, request: Request):
 
 @router.delete("/seen-urls", status_code=204)
 async def clear_seen_urls(request: Request):
-    request.app.state.seen_urls_path.write_text("[]")
+    path = request.app.state.seen_urls_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[]")
 
 
 @router.get("/feedback", response_class=HTMLResponse)

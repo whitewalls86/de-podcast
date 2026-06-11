@@ -138,6 +138,16 @@ def test_clear_seen_urls_when_file_missing_still_204(client, admin_paths):
     assert (admin_paths / "seen_urls.json").read_text() == "[]"
 
 
+def test_clear_seen_urls_when_parent_dir_missing_still_204(admin_paths):
+    app.state.seen_urls_path = admin_paths / "data" / "seen_urls.json"
+    try:
+        r = TestClient(app).delete("/admin/seen-urls")
+        assert r.status_code == 204
+        assert (admin_paths / "data" / "seen_urls.json").read_text() == "[]"
+    finally:
+        app.state.seen_urls_path = admin_paths / "seen_urls.json"
+
+
 def test_feedback_page_no_file_renders_cleanly(client):
     r = client.get("/admin/feedback")
     assert r.status_code == 200
