@@ -69,6 +69,19 @@ async def test_batch_titles_present(monkeypatch):
     assert result["batch_b"]["title"] == "Batch Processing"
 
 
+async def test_fenced_json_is_parsed(monkeypatch):
+    urls = ["http://example.com/1", "http://example.com/2"]
+    articles = make_articles(urls)
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": [urls[0]]},
+        "batch_b": {"title": "B", "urls": [urls[1]]},
+    }
+    fenced = f"```json\n{json.dumps(cluster_result)}\n```"
+    with patch("pipeline.clustering.get_anthropic_client", return_value=mock_client(fenced)):
+        result = await cluster(articles)
+    assert result["batch_a"]["title"] == "A"
+
+
 async def test_invalid_json_raises(monkeypatch):
     articles = make_articles(["http://example.com/1", "http://example.com/2"])
     with patch(
