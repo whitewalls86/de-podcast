@@ -109,6 +109,16 @@ async def test_artifact_timeout_is_not_retried(episodes_dir):
     assert client.notebooks.create.await_count == 1  # no retry
 
 
+async def test_asyncio_timeout_is_not_retried(episodes_dir):
+    # asyncio.TimeoutError from the outer wait_for watchdog should also not retry.
+    client, _ = _make_client()
+    with _patch_client(client):
+        with patch("pipeline.notebooklm_gen.asyncio.wait_for", side_effect=TimeoutError()):
+            with pytest.raises(TimeoutError):
+                await generate_episode("batch_a", "Streaming", _URLS)
+    assert client.notebooks.create.await_count == 1  # no retry
+
+
 async def test_retry_first_attempt_fails_second_succeeds(episodes_dir):
     client, nb = _make_client()
     second_status = MagicMock()

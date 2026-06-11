@@ -64,7 +64,7 @@ async def generate_episode(batch_key: str, title: str, urls: list[str]) -> tuple
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             return await _generate_once(title, urls, dest)
-        except ArtifactInProgressTimeoutError:
+        except (ArtifactInProgressTimeoutError, TimeoutError):
             raise  # timeout = generation started but took too long; retrying wastes a credit
         except Exception as exc:  # noqa: BLE001 - retried below, re-raised after last attempt
             last_exc = exc
