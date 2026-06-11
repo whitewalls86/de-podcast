@@ -126,10 +126,12 @@ def test_feed_xml_enclosure_has_correct_type():
     _post_episode(filename="integ_enc.mp3", seed=3)
     r = httpx.get(f"{FEED}/feed.xml")
     root = ET.fromstring(r.content)
-    enclosure = root.find(".//enclosure")
-    assert enclosure is not None
+    enclosure = next(
+        (e for e in root.findall(".//enclosure") if "integ_enc.mp3" in e.get("url", "")),
+        None,
+    )
+    assert enclosure is not None, "integ_enc.mp3 not found in feed enclosures"
     assert enclosure.get("type") == "audio/mpeg"
-    assert "integ_enc.mp3" in enclosure.get("url", "")
 
 
 def test_episode_file_is_served():
