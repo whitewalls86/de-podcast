@@ -30,6 +30,9 @@ scripts/*
 # Graphify local outputs
 graphify-out/
 
+# Local writing drafts
+Docs/linkedin-drafts/
+
 # IDE
 .claude/
 .idea/
