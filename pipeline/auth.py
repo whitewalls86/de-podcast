@@ -3,11 +3,10 @@ import json
 import logging
 import os
 import subprocess
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
-_EXPIRY_WARN_DAYS = 7
 _VNC_URL = "http://localhost:6080/vnc.html"
 
 
@@ -16,20 +15,19 @@ def _now_iso() -> str:
 
 
 def _classify(data: dict) -> str:
-    """Map the auth-check JSON to one of: ok / expiring / expired."""
-    if not data.get("valid", False):
-        return "expired"
-    expires_at = data.get("expires_at")
-    if expires_at:
-        try:
-            exp = datetime.fromisoformat(expires_at)
-        except ValueError:
-            return "ok"
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=UTC)
-        if exp - datetime.now(UTC) <= timedelta(days=_EXPIRY_WARN_DAYS):
-            return "expiring"
-    return "ok"
+    """Map the real CLI JSON envelope to ok / expiring / expired.
+
+    CLI shape: {"status": "ok"|"error", "checks": {...}, "details": {...}}
+    "expiring": cookies present but token_fetch failed — session-token rotation;
+    headless /auth/refresh may fix it without a full browser re-auth.
+    "expired": no auth file, missing cookies, or any other hard failure.
+    """
+    if data.get("status") == "ok":
+        return "ok"
+    checks = data.get("checks", {})
+    if checks.get("cookies_present") and checks.get("token_fetch") is False:
+        return "expiring"
+    return "expired"
 
 
 def get_auth_status() -> dict:

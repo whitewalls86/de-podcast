@@ -127,6 +127,10 @@ async def run_pipeline(
 
     clusters = await cluster(ranked)
 
+    # Build a URL → tags lookup from ranked articles so each batch inherits
+    # the union of its constituent articles' topic tags.
+    url_tags: dict[str, list[str]] = {a["url"]: a.get("topic_tags", []) for a in ranked}
+
     today_utc = datetime.now(UTC).strftime("%Y-%m-%d")
     batches = []
     seen_to_add: set[str] = set()
@@ -134,11 +138,12 @@ async def run_pipeline(
         try:
             mp3_path = await generate_fn(batch_key, batch["title"], batch["urls"])
             episode_id = f"{_slugify(batch['title'])}-{today_utc}"
+            batch_tags = sorted({t for url in batch["urls"] for t in url_tags.get(url, [])})
             await _post_to_feed(
                 mp3_path=mp3_path,
                 title=batch["title"],
                 episode_id=episode_id,
-                topic_tags=batch.get("topic_tags", []),
+                topic_tags=batch_tags,
             )
             batches.append({"title": batch["title"], "mp3": mp3_path, "episode_id": episode_id})
             seen_to_add.update(batch["urls"])

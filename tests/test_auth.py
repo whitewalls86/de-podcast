@@ -1,5 +1,4 @@
 import json
-from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,27 +9,41 @@ def _proc(returncode=0, stdout="", stderr=""):
     return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def _iso(days_from_now):
-    return (datetime.now(UTC) + timedelta(days=days_from_now)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _checks(**overrides):
+    """Build a checks dict matching the real notebooklm auth check --test --json shape."""
+    base = {
+        "storage_exists": True,
+        "json_valid": True,
+        "cookies_present": True,
+        "sid_cookie": True,
+        "token_fetch": True,
+    }
+    return {**base, **overrides}
 
 
 def test_get_auth_status_ok():
-    out = json.dumps({"valid": True, "expires_at": _iso(30)})
+    out = json.dumps({"status": "ok", "checks": _checks(), "details": {}})
     with patch("pipeline.auth.subprocess.run", return_value=_proc(stdout=out)):
         result = get_auth_status()
     assert result["status"] == "ok"
     assert result["checked_at"]
 
 
-def test_get_auth_status_expiring_within_seven_days():
-    out = json.dumps({"valid": True, "expires_at": _iso(3)})
+def test_get_auth_status_expiring_when_cookies_present_but_token_fetch_failed():
+    out = json.dumps({"status": "error", "checks": _checks(token_fetch=False), "details": {}})
     with patch("pipeline.auth.subprocess.run", return_value=_proc(stdout=out)):
         result = get_auth_status()
     assert result["status"] == "expiring"
 
 
-def test_get_auth_status_expired():
-    out = json.dumps({"valid": False})
+def test_get_auth_status_expired_when_cookies_missing():
+    out = json.dumps(
+        {
+            "status": "error",
+            "checks": _checks(cookies_present=False, token_fetch=None),
+            "details": {},
+        }
+    )
     with patch("pipeline.auth.subprocess.run", return_value=_proc(stdout=out)):
         result = get_auth_status()
     assert result["status"] == "expired"

@@ -281,6 +281,42 @@ async def test_post_to_feed_sends_correct_multipart_fields(tmp_path, monkeypatch
     assert call.kwargs["headers"]["Authorization"] == "Bearer secret"
 
 
+async def test_ranked_tags_flow_to_feed_post(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+
+    # Article A → kafka + streaming, Article B → dbt, Article C → spark
+    ranked_with_tags = [
+        {**a, "score": 0.9, "reason": "", "topic_tags": tags}
+        for a, tags in zip(
+            _ARTICLES,
+            [["kafka", "streaming"], ["dbt"], ["spark"]],
+        )
+    ]
+    # batch_a has URLs a+b → union {kafka, streaming, dbt}
+    # batch_b has URL c   → {spark}
+
+    post_mock = AsyncMock()
+    patches = [
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=AsyncMock(return_value=ranked_with_tags)),
+        patch("pipeline.pipeline.cluster", new=AsyncMock(return_value=_CLUSTERS)),
+        patch("pipeline.pipeline._post_to_feed", new=post_mock),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
+    finally:
+        for p in patches:
+            p.stop()
+
+    by_title = {c.kwargs["title"]: c.kwargs["topic_tags"] for c in post_mock.await_args_list}
+    assert set(by_title["Streaming"]) == {"kafka", "streaming", "dbt"}
+    assert set(by_title["Batch"]) == {"spark"}
+
+
 async def test_feed_post_failure_marks_batch_failed(tmp_path):
     sources = tmp_path / "sources.json"
     sources.write_text("[]")
