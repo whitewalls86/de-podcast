@@ -220,3 +220,120 @@ async def test_seen_file_created_if_absent(tmp_path):
             p.stop()
 
     assert seen.exists()
+
+
+# --- feed posting (step 6) ---
+
+from unittest.mock import MagicMock  # noqa: E402
+
+from pipeline.pipeline import _post_to_feed  # noqa: E402
+
+
+async def test_run_pipeline_posts_each_successful_batch(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+
+    post_mock = AsyncMock()
+    patches = _patch_stages() + [patch("pipeline.pipeline._post_to_feed", new=post_mock)]
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert post_mock.await_count == len(_CLUSTERS)
+    posted_ids = {c.kwargs["episode_id"] for c in post_mock.await_args_list}
+    assert any(eid.startswith("streaming-") for eid in posted_ids)
+
+
+async def test_post_to_feed_sends_correct_multipart_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("FEED_URL", "http://feed:8000")
+    monkeypatch.setenv("FEED_TOKEN", "secret")
+    mp3 = tmp_path / "episode.mp3"
+    mp3.write_bytes(b"ID3 fake mp3 bytes")
+
+    resp = MagicMock(status_code=200)
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=resp)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=client)
+    cm.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("pipeline.pipeline.httpx.AsyncClient", return_value=cm):
+        await _post_to_feed(
+            mp3_path=str(mp3),
+            title="Streaming Pipelines",
+            episode_id="streaming-pipelines-2026-06-10",
+            topic_tags=["streaming", "kafka"],
+        )
+
+    call = client.post.call_args
+    assert call.args[0] == "http://feed:8000/episodes"
+    data = call.kwargs["data"]
+    assert data["title"] == "Streaming Pipelines"
+    assert data["episode_id"] == "streaming-pipelines-2026-06-10"
+    assert data["tags"] == "streaming,kafka"
+    assert data["description"] == ""
+    assert "file" in call.kwargs["files"]
+    assert call.kwargs["headers"]["Authorization"] == "Bearer secret"
+
+
+async def test_ranked_tags_flow_to_feed_post(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+
+    # Article A → kafka + streaming, Article B → dbt, Article C → spark
+    ranked_with_tags = [
+        {**a, "score": 0.9, "reason": "", "topic_tags": tags}
+        for a, tags in zip(
+            _ARTICLES,
+            [["kafka", "streaming"], ["dbt"], ["spark"]],
+        )
+    ]
+    # batch_a has URLs a+b → union {kafka, streaming, dbt}
+    # batch_b has URL c   → {spark}
+
+    post_mock = AsyncMock()
+    patches = [
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=AsyncMock(return_value=ranked_with_tags)),
+        patch("pipeline.pipeline.cluster", new=AsyncMock(return_value=_CLUSTERS)),
+        patch("pipeline.pipeline._post_to_feed", new=post_mock),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
+    finally:
+        for p in patches:
+            p.stop()
+
+    by_title = {c.kwargs["title"]: c.kwargs["topic_tags"] for c in post_mock.await_args_list}
+    assert set(by_title["Streaming"]) == {"kafka", "streaming", "dbt"}
+    assert set(by_title["Batch"]) == {"spark"}
+
+
+async def test_feed_post_failure_marks_batch_failed(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+
+    failing_post = AsyncMock(side_effect=RuntimeError("feed down"))
+    patches = _patch_stages() + [patch("pipeline.pipeline._post_to_feed", new=failing_post)]
+    for p in patches:
+        p.start()
+    try:
+        result = await run_pipeline(
+            sources_path=sources, seen_path=seen, generate_fn=_fake_generate
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert result["status"] == "failed"
+    assert result["batches"] == []
+    assert not seen.exists()

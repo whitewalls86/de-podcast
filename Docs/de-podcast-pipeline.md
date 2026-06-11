@@ -58,6 +58,7 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FEED_TOKEN=${FEED_TOKEN}
+      - FEED_URL=http://feed:8000
       - FEED_HOST=http://${HOST_LAN_IP}:8000
     depends_on:
       - feed

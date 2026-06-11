@@ -18,11 +18,87 @@
 
 <section>
   <h2>Auth Status</h2>
-  <p>
-    <span class="badge badge-{{ auth.status }}">{{ auth.status }}</span>
-    {% if auth.checked_at %} — last checked {{ auth.checked_at }}{% endif %}
+  <p id="auth-badge-line">
+    <span id="auth-badge" class="badge badge-{{ auth.status }}">{{ auth.status }}</span>
+    {% if auth.checked_at %}<span id="auth-checked"> — last checked {{ auth.checked_at }}</span>{% endif %}
   </p>
+  <p id="auth-actions">
+    {% if auth.status in ("expiring", "expired", "error") %}
+    <button onclick="authRefresh()">Refresh</button>
+    {% endif %}
+    {% if auth.status in ("expired", "error") %}
+    <button onclick="authReauth()">Re-authenticate via VNC</button>
+    {% endif %}
+  </p>
+  <p id="auth-message" style="color:#856404"></p>
 </section>
+
+<script>
+async function authRefresh() {
+  setAuthMessage("Refreshing…");
+  try {
+    const r = await fetch("/auth/refresh", {method: "POST"});
+    const d = await r.json();
+    if (d.status === "ok") {
+      setAuthMessage("Refresh succeeded.");
+      await pollAuthStatus();
+    } else {
+      setAuthMessage("Refresh failed: " + (d.detail || d.status));
+    }
+  } catch (e) {
+    setAuthMessage("Request error: " + e);
+  }
+}
+
+async function authReauth() {
+  setAuthMessage("Starting re-auth session…");
+  try {
+    const r = await fetch("/auth/reauth", {method: "POST"});
+    const d = await r.json();
+    if (d.status === "started" || d.status === "already_running") {
+      window.open(d.vnc_url, "_blank");
+      setAuthMessage("VNC session open — complete login, then status will update automatically.");
+      pollAuthStatus(true);
+    } else {
+      setAuthMessage("Could not start re-auth: " + d.status);
+    }
+  } catch (e) {
+    setAuthMessage("Request error: " + e);
+  }
+}
+
+async function pollAuthStatus(loop) {
+  const maxAttempts = loop ? 60 : 1;
+  for (let i = 0; i < maxAttempts; i++) {
+    if (i > 0) await new Promise(res => setTimeout(res, 10000));
+    try {
+      const r = await fetch("/auth/status");
+      const d = await r.json();
+      updateAuthBadge(d);
+      if (d.status === "ok") { setAuthMessage("Auth is active."); return; }
+    } catch (_) {}
+  }
+}
+
+function updateAuthBadge(d) {
+  const badge = document.getElementById("auth-badge");
+  badge.className = "badge badge-" + d.status;
+  badge.textContent = d.status;
+  const checked = document.getElementById("auth-checked");
+  if (checked && d.checked_at) checked.textContent = " — last checked " + d.checked_at;
+  // show/hide action buttons based on new status
+  const actions = document.getElementById("auth-actions");
+  const needsRefresh = ["expiring", "expired", "error"].includes(d.status);
+  const needsReauth = ["expired", "error"].includes(d.status);
+  actions.innerHTML =
+    (needsRefresh ? '<button onclick="authRefresh()">Refresh</button> ' : "") +
+    (needsReauth ? '<button onclick="authReauth()">Re-authenticate via VNC</button>' : "");
+}
+
+function setAuthMessage(msg) {
+  document.getElementById("auth-message").textContent = msg;
+}
+</script>
 
 <section>
   <h2>Today's Episodes</h2>
