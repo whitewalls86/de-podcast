@@ -99,6 +99,8 @@ def add_episode(
     title: str = Form(...),
     description: str = Form(""),
     pub_date: str = Form(...),
+    episode_id: str = Form(""),
+    tags: str = Form(""),
 ) -> dict:
     try:
         pub_dt = datetime.fromisoformat(pub_date)
@@ -106,6 +108,16 @@ def add_episode(
         raise HTTPException(status_code=422, detail="Invalid pub_date — expected ISO 8601")
     if pub_dt.tzinfo is None:
         pub_dt = pub_dt.replace(tzinfo=UTC)
+
+    if episode_id:
+        vote_title = quote(title, safe="")
+        vote_tags = quote(tags, safe="")
+        vote_base = f"{FEED_HOST}/feedback/{episode_id}"
+        description = (
+            description + f"\n\n---\nWas this episode useful?\n"
+            f"👍 Yes: {vote_base}?vote=up&title={vote_title}&tags={vote_tags}\n"
+            f"👎 No: {vote_base}?vote=down&title={vote_title}&tags={vote_tags}"
+        )
 
     filename = safe_filename(file.filename)
     if not filename.lower().endswith(".mp3") or file.content_type != "audio/mpeg":

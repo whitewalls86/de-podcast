@@ -208,3 +208,52 @@ async def test_score_as_bool_raises(monkeypatch):
     ):
         with pytest.raises(ValueError, match="'score' must be a float in"):
             await rank(articles)
+
+
+# --- build_ranking_prompt ---
+
+from pipeline.ranking import build_ranking_prompt  # noqa: E402
+
+
+def test_build_ranking_prompt_without_few_shot_omits_preference_section():
+    articles = make_articles(2)
+    prompt = build_ranking_prompt(articles, "")
+    assert "Liked:" not in prompt
+    assert "Disliked:" not in prompt
+    assert "Score these articles:" in prompt
+
+
+def test_build_ranking_prompt_with_few_shot_includes_it():
+    articles = make_articles(2)
+    few_shot = 'User feedback on past episodes:\nLiked:\n  - "Great" [tags: dbt]'
+    prompt = build_ranking_prompt(articles, few_shot)
+    assert few_shot in prompt
+    assert "Score these articles:" in prompt
+    assert prompt.index(few_shot) < prompt.index("Score these articles:")
+
+
+async def test_rank_with_feedback_passes_context_to_prompt(tmp_path):
+    feedback = tmp_path / "feedback.json"
+    entries = [
+        {
+            "episode_id": f"ep-{i}",
+            "title": f"Great Episode {i}",
+            "topic_tags": ["dbt"],
+            "article_urls": [],
+            "vote": "up",
+            "timestamp": "2026-06-10T08:00:00Z",
+        }
+        for i in range(3)
+    ]
+    feedback.write_text(json.dumps(entries))
+
+    articles = make_articles(2)
+    scores = [{"url": a["url"], "score": 0.9, "reason": "ok"} for a in articles]
+    client = mock_client(json.dumps(scores))
+
+    with patch("pipeline.ranking.get_anthropic_client", return_value=client):
+        await rank(articles, feedback_path=feedback)
+
+    call_kwargs = client.messages.create.call_args.kwargs
+    user_content = call_kwargs["messages"][0]["content"]
+    assert "Liked:" in user_content

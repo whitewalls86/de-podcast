@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,13 @@ _DEFAULT_SEEN = Path("data/seen_urls.json")
 _DEFAULT_LAST_RUN = Path("data/last_run.json")
 
 GenerateFn = Callable[[str, str, list[str]], Awaitable[str]]
+
+
+def _slugify(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_]+", "-", text)
+    return re.sub(r"-+", "-", text).strip("-")
 
 
 def _load_seen(seen_path: Path) -> set[str]:
@@ -69,12 +77,14 @@ async def run_pipeline(
 
     clusters = await cluster(ranked)
 
+    today_utc = datetime.now(UTC).strftime("%Y-%m-%d")
     batches = []
     seen_to_add: set[str] = set()
     for batch_key, batch in clusters.items():
         try:
             mp3_path = await generate_fn(batch_key, batch["title"], batch["urls"])
-            batches.append({"title": batch["title"], "mp3": mp3_path})
+            episode_id = f"{_slugify(batch['title'])}-{today_utc}"
+            batches.append({"title": batch["title"], "mp3": mp3_path, "episode_id": episode_id})
             seen_to_add.update(batch["urls"])
         except Exception:
             logger.exception(

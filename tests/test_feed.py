@@ -363,3 +363,42 @@ def test_encoded_url_appears_in_feed_enclosure():
     enclosure = xml.find("channel/item/enclosure")
     assert "%20" in enclosure.get("url", "")
     assert " " not in enclosure.get("url", "")
+
+
+# --- vote links ---
+
+
+def test_post_episode_with_episode_id_appends_vote_links():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={
+            "title": "dbt Testing",
+            "pub_date": "2026-06-10T06:00:00",
+            "episode_id": "dbt-testing-2026-06-10",
+            "tags": "dbt,testing",
+        },
+        files={"file": ("ep.mp3", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert r.status_code == 200
+    episodes = json.loads(feed_module.EPISODES_JSON.read_text())
+    description = episodes[0]["description"]
+    assert "vote=up" in description
+    assert "vote=down" in description
+    assert "dbt-testing-2026-06-10" in description
+
+
+def test_post_episode_without_episode_id_leaves_description_unchanged():
+    r = client.post(
+        "/episodes",
+        headers=AUTH,
+        data={
+            "title": "No Vote",
+            "pub_date": "2026-06-10T06:00:00",
+            "description": "Original description",
+        },
+        files={"file": ("ep.mp3", io.BytesIO(b"x"), "audio/mpeg")},
+    )
+    assert r.status_code == 200
+    episodes = json.loads(feed_module.EPISODES_JSON.read_text())
+    assert episodes[0]["description"] == "Original description"
