@@ -9,7 +9,10 @@ try:
     from notebooklm.exceptions import ArtifactInProgressTimeoutError
 except ImportError:  # pragma: no cover - real package only present in the container
     NotebookLMClient = None  # type: ignore[assignment]
-    ArtifactInProgressTimeoutError = Exception  # type: ignore[assignment,misc]
+
+    class ArtifactInProgressTimeoutError(Exception):  # type: ignore[no-redef]
+        pass
+
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pipeline.notebooklm_gen import generate_episode
+from pipeline.notebooklm_gen import ArtifactInProgressTimeoutError, generate_episode
 
 _URLS = ["http://example.com/a", "http://example.com/b"]
 
@@ -96,6 +96,17 @@ async def test_timeout_raises_timeout_error(episodes_dir):
         ):
             with pytest.raises(TimeoutError):
                 await generate_episode("batch_a", "Streaming", _URLS)
+
+
+async def test_artifact_timeout_is_not_retried(episodes_dir):
+    # ArtifactInProgressTimeoutError means generation started but timed out —
+    # retrying would burn another daily credit, so it should propagate immediately.
+    client, _ = _make_client()
+    client.artifacts.generate_audio = AsyncMock(side_effect=ArtifactInProgressTimeoutError())
+    with _patch_client(client):
+        with pytest.raises(ArtifactInProgressTimeoutError):
+            await generate_episode("batch_a", "Streaming", _URLS)
+    assert client.notebooks.create.await_count == 1  # no retry
 
 
 async def test_retry_first_attempt_fails_second_succeeds(episodes_dir):
