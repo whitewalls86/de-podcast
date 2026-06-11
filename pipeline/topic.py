@@ -35,7 +35,9 @@ def validate_topic(data: dict) -> dict:
         raise ValueError("topic.json field 'ranking_criteria': missing")
     if not isinstance(criteria, list):
         raise ValueError("topic.json field 'ranking_criteria': must be a list of strings")
-    stripped = [c.strip() for c in criteria if isinstance(c, str) and c.strip()]
+    if not all(isinstance(c, str) for c in criteria):
+        raise ValueError("topic.json field 'ranking_criteria': must be a list of strings")
+    stripped = [c.strip() for c in criteria if c.strip()]
     if not stripped:
         raise ValueError(
             "topic.json field 'ranking_criteria': must contain at least one non-empty string"
@@ -49,11 +51,10 @@ def load_topic(path: Path = Path("topic.json")) -> dict:
     if not path.exists():
         return copy.deepcopy(DEFAULT_TOPIC)
     data = json.loads(path.read_text())
-    validate_topic(data)
-    return data
+    return validate_topic(data)
 
 
 def save_topic(data: dict, *, path: Path) -> None:
-    validate_topic(data)
+    cleaned = validate_topic(data)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(cleaned, indent=2))
