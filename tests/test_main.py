@@ -81,3 +81,13 @@ def test_auth_reauth_returns_200_with_vnc_url(client):
         r = client.post("/auth/reauth")
     assert r.status_code == 200
     assert r.json()["vnc_url"] == "http://localhost:6080/vnc.html"
+
+
+def test_auth_reauth_status_returns_200_with_status(client):
+    with patch(
+        "pipeline.main.get_auth_status",
+        return_value={"status": "ok", "checked_at": "2026-06-10T06:00:00Z"},
+    ):
+        r = client.get("/auth/reauth/status")
+    assert r.status_code == 200
+    assert "status" in r.json()

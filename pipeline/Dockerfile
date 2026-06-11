@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir "notebooklm-py[browser]" httpx
+RUN pip install --no-cache-dir "notebooklm-py[browser]==0.7.1" httpx
 RUN playwright install chromium
 RUN playwright install-deps chromium
 

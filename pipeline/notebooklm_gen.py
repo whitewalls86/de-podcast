@@ -1,18 +1,16 @@
 import asyncio
 import logging
 import os
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 try:
-    from notebooklm import NotebookLM
+    from notebooklm import NotebookLMClient
 except ImportError:  # pragma: no cover - real package only present in the container
-    NotebookLM = None  # type: ignore[assignment]
+    NotebookLMClient = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
-_POLL_INTERVAL_S = 30
 _TIMEOUT_S = 15 * 60
 _MAX_ATTEMPTS = 2
 
@@ -21,34 +19,24 @@ def _episodes_dir() -> Path:
     return Path(os.environ.get("EPISODES_DIR", "/app/episodes"))
 
 
-async def _wait_for_audio(notebook, audio) -> None:
-    """Poll the notebook's audio overview until it is ready or the timeout elapses."""
-    start = time.monotonic()
-    while True:
-        status = await notebook.get_audio_status(audio)
-        if status == "complete":
-            return
-        if status == "failed":
-            raise RuntimeError("NotebookLM reported audio generation failed")
-        if time.monotonic() - start >= _TIMEOUT_S:
-            raise TimeoutError(f"Audio generation timed out after {_TIMEOUT_S}s")
-        await asyncio.sleep(_POLL_INTERVAL_S)
-
-
 async def _generate_once(title: str, urls: list[str], dest: Path) -> str:
-    nlm = NotebookLM()
-    notebook = await nlm.create_notebook(name=f"DE Daily - {title}")
-    try:
-        for url in urls:
-            await notebook.add_source(url)
-        audio = await notebook.create_audio_overview(
-            focus=f"Practical data engineering techniques. Topic: {title}"
-        )
-        await _wait_for_audio(notebook, audio)
-        await notebook.download_audio(audio, str(dest))
-        return str(dest)
-    finally:
-        await notebook.delete()
+    async with NotebookLMClient.from_storage() as client:
+        nb = await client.notebooks.create(f"DE Daily - {title}")
+        try:
+            for url in urls:
+                await client.sources.add_url(nb.id, url, wait=True)
+            status = await client.artifacts.generate_audio(
+                nb.id,
+                instructions=f"Practical data engineering techniques. Topic: {title}",
+            )
+            await asyncio.wait_for(
+                client.artifacts.wait_for_completion(nb.id, status.task_id),
+                timeout=_TIMEOUT_S,
+            )
+            await client.artifacts.download_audio(nb.id, str(dest))
+            return str(dest)
+        finally:
+            await client.notebooks.delete(nb.id)
 
 
 async def generate_episode(batch_key: str, title: str, urls: list[str]) -> str:

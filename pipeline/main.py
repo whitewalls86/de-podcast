@@ -92,6 +92,11 @@ async def auth_reauth():
     return await start_reauth()
 
 
+@app.get("/auth/reauth/status")
+async def auth_reauth_status():
+    return get_auth_status()
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
