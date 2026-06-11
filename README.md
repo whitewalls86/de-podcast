@@ -122,7 +122,7 @@ pytest --ignore=tests/integration
 pytest tests/integration/ --integration
 ```
 
-CI runs both on every push (integration job uses `USE_MOCK_GENERATE=true`).
+CI runs both on PRs and on pushes to `master`/`implementation` (integration job uses `USE_MOCK_GENERATE=true`).
 
 ---
 
