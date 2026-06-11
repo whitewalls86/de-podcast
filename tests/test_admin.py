@@ -12,13 +12,16 @@ def admin_paths(tmp_path):
     prev_sources = getattr(app.state, "sources_path", None)
     prev_last_run = getattr(app.state, "last_run_path", None)
     prev_feedback = getattr(app.state, "feedback_path", None)
+    prev_seen_urls = getattr(app.state, "seen_urls_path", None)
     app.state.sources_path = tmp_path / "sources.json"
     app.state.last_run_path = tmp_path / "last_run.json"
     app.state.feedback_path = tmp_path / "feedback.json"
+    app.state.seen_urls_path = tmp_path / "seen_urls.json"
     yield tmp_path
     app.state.sources_path = prev_sources
     app.state.last_run_path = prev_last_run
     app.state.feedback_path = prev_feedback
+    app.state.seen_urls_path = prev_seen_urls
 
 
 @pytest.fixture
@@ -119,6 +122,30 @@ def test_delete_source_missing_returns_404(client):
 def test_toggle_source_missing_returns_404(client):
     r = client.patch("/admin/sources/nonexistent")
     assert r.status_code == 404
+
+
+def test_clear_seen_urls_empties_file(client, admin_paths):
+    (admin_paths / "seen_urls.json").write_text('["https://example.com/1","https://example.com/2"]')
+    r = client.delete("/admin/seen-urls")
+    assert r.status_code == 204
+    assert (admin_paths / "seen_urls.json").read_text() == "[]"
+
+
+def test_clear_seen_urls_when_file_missing_still_204(client, admin_paths):
+    assert not (admin_paths / "seen_urls.json").exists()
+    r = client.delete("/admin/seen-urls")
+    assert r.status_code == 204
+    assert (admin_paths / "seen_urls.json").read_text() == "[]"
+
+
+def test_clear_seen_urls_when_parent_dir_missing_still_204(admin_paths):
+    app.state.seen_urls_path = admin_paths / "data" / "seen_urls.json"
+    try:
+        r = TestClient(app).delete("/admin/seen-urls")
+        assert r.status_code == 204
+        assert (admin_paths / "data" / "seen_urls.json").read_text() == "[]"
+    finally:
+        app.state.seen_urls_path = admin_paths / "seen_urls.json"
 
 
 def test_feedback_page_no_file_renders_cleanly(client):
