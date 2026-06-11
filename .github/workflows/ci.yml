@@ -48,6 +48,7 @@ jobs:
           N8N_USER=admin
           N8N_PASSWORD=ci-test-password
           ANTHROPIC_API_KEY=not-used-in-ci
+          USE_MOCK_GENERATE=true
           EOF
 
       - name: Build and start stack

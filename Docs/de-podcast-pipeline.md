@@ -2,7 +2,7 @@
 
 ## Overview
 
-An automated pipeline that discovers the most interesting data engineering articles published in the last 24–48 hours, groups them into two thematic batches, generates a NotebookLM audio overview for each batch, and delivers two MP3 episodes to a local private RSS feed accessible from home WiFi.
+An automated pipeline that discovers the most interesting data engineering articles published in the last 24–48 hours, groups them into two thematic batches, generates a NotebookLM audio overview for each batch, and delivers two MP3 episodes to a private RSS feed accessible over Tailscale.
 
 **Goal:** Wake up to two fresh, listenable DE podcast episodes synced to your phone every morning. Zero manual effort after initial setup.
 
@@ -11,7 +11,7 @@ An automated pipeline that discovers the most interesting data engineering artic
 ## Constraints & Principles
 
 - **Free to run**: No paid APIs. NotebookLM on a personal Google account (free tier: 3 audio overviews/day). Article sources are free RSS/APIs.
-- **Local RSS only**: Feed server reachable on home LAN only. No cloud hosting. Phone syncs over home WiFi.
+- **Local RSS only**: Feed server reachable via Tailscale only. No cloud hosting. Phone syncs over Tailscale VPN.
 - **Isolated from CarTracker**: Entirely separate Docker Compose stack, separate repo, separate ports.
 - **Dockerized**: All services run in Docker Desktop on Windows. Portable, shareable on GitHub.
 - **Orchestrated by n8n**: n8n container handles scheduling. Pipeline container exposes an HTTP endpoint n8n calls.
@@ -46,6 +46,7 @@ An automated pipeline that discovers the most interesting data engineering artic
 services:
 
   pipeline:
+    profiles: [pipeline]
     build: ./pipeline
     ports:
       - "8001:8001"   # pipeline API + admin UI
@@ -60,13 +61,16 @@ services:
       - FEED_TOKEN=${FEED_TOKEN}
       - FEED_URL=http://feed:8000
       - FEED_HOST=http://${HOST_LAN_IP}:8000
+      - USE_DEV_CLIENT=${USE_DEV_CLIENT:-false}
+      - USE_MOCK_GENERATE=${USE_MOCK_GENERATE:-false}
+      - MAX_BATCHES=${MAX_BATCHES:-0}
     depends_on:
       - feed
 
   feed:
     build: ./feed
     ports:
-      - "8000:8000"   # RSS feed (LAN accessible)
+      - "8000:8000"   # RSS feed (accessible via Tailscale)
     volumes:
       - episodes:/app/episodes
     environment:
@@ -96,7 +100,7 @@ volumes:
 **Ports summary:**
 | Port | Service | Accessible from |
 |---|---|---|
-| 8000 | RSS feed | LAN (podcast app) |
+| 8000 | RSS feed | Phone via Tailscale; PC via localhost |
 | 8001 | Pipeline API + Admin UI | localhost |
 | 5678 | n8n | localhost |
 | 6080 | noVNC re-auth | localhost |
@@ -136,10 +140,10 @@ volumes:
 │  GET  /feed.xml  ← podcast app polls                │
 │  GET  /episodes/{filename}  ← audio file serving   │
 └──────────────────────┬──────────────────────────────┘
-                       │ home LAN
+                       │ Tailscale VPN
               ┌────────▼────────┐
-              │  Overcast /     │
-              │  Pocket Casts   │
+              │  Apple Podcasts │
+              │  (phone)        │
               └─────────────────┘
 ```
 
@@ -154,16 +158,18 @@ Pulls from the following sources in parallel. Active source list is read from `s
 **Default sources in `sources.json`:**
 ```json
 [
-  {"name": "Towards Data Science", "url": "https://towardsdatascience.com/feed", "type": "rss", "active": true},
+  {"name": "Towards Data Science", "url": "https://towardsdatascience.com/feed", "type": "rss", "active": false},
   {"name": "dbt Blog", "url": "https://www.getdbt.com/blog/rss", "type": "rss", "active": true},
   {"name": "Locally Optimistic", "url": "https://locallyoptimistic.com/feed.xml", "type": "rss", "active": true},
   {"name": "Datafold Blog", "url": "https://www.datafold.com/blog/rss.xml", "type": "rss", "active": true},
   {"name": "DataEngineer.io", "url": "https://dataengineer.io/rss", "type": "rss", "active": true},
-  {"name": "Medium DE tag", "url": "https://medium.com/feed/tag/data-engineering", "type": "rss", "active": true},
-  {"name": "Hacker News", "url": "https://hn.algolia.com/api/v1/search", "type": "hn", "active": true},
+  {"name": "Medium DE tag", "url": "https://medium.com/feed/tag/data-engineering", "type": "rss", "active": false},
+  {"name": "Hacker News", "url": "https://hn.algolia.com/api/v1/search_by_date", "type": "hn", "active": true},
   {"name": "r/dataengineering", "url": "https://www.reddit.com/r/dataengineering/top/.rss?t=day", "type": "rss", "active": true}
 ]
 ```
+
+TDS and Medium are disabled by default — their articles are paywalled, so NotebookLM can't fetch the full content.
 
 **Output:** List of article dicts: `{title, url, source, published_at, snippet}`
 
@@ -221,11 +227,11 @@ A lightweight feedback mechanism that lets you rate episodes from within your po
 
 Each episode's RSS description contains two links:
 ```
-👍 Good episode  →  http://192.168.1.x:8001/feedback/{episode_id}?vote=up
-👎 Skip this topic  →  http://192.168.1.x:8001/feedback/{episode_id}?vote=down
+👍 Good episode  →  http://<tailscale-ip>:8001/feedback/{episode_id}?vote=up
+👎 Skip this topic  →  http://<tailscale-ip>:8001/feedback/{episode_id}?vote=down
 ```
 
-Tapping either link from Overcast/Pocket Casts opens a minimal mobile confirmation page, records the vote, done.
+Tapping either link from Apple Podcasts opens a minimal mobile confirmation page, records the vote, done.
 
 **Feedback storage (`/app/data/feedback.json`):**
 ```json
@@ -447,12 +453,11 @@ de-podcast/
 │   ├── feedback.py               # read/write feedback.json, build few-shot context
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
-│   ├── utils.py
 │   └── templates/                # Jinja2 HTML templates
 │       ├── base.html
 │       ├── dashboard.html
 │       ├── sources.html
-│       └── feedback_confirm.html # mobile vote confirmation page
+│       └── feedback.html         # feedback history view (vote confirmation is inline HTML)
 │
 ├── feed/
 │   ├── Dockerfile
@@ -468,7 +473,8 @@ de-podcast/
     ├── test_clustering.py
     ├── test_pipeline.py
     ├── test_main.py
-    └── test_feed.py
+    ├── test_feed.py
+    └── integration/              # requires full stack; run with --integration flag
 ```
 
 ---
@@ -478,23 +484,27 @@ de-podcast/
 ```bash
 # .env  (gitignored)
 ANTHROPIC_API_KEY=sk-ant-...
-USE_DEV_CLIENT=false              # local dev only; use Claude CLI instead of Anthropic API
+USE_DEV_CLIENT=false              # local dev only; routes Claude calls through CLI
+USE_MOCK_GENERATE=false           # skip NotebookLM, write fake MP3s (testing)
 FEED_TOKEN=<random-string>
-HOST_LAN_IP=192.168.1.x       # Windows machine's LAN IP
+HOST_LAN_IP=100.x.x.x            # Tailscale IP of Windows machine (tailscale ip -4)
 FEED_TITLE=DE Daily
 N8N_USER=admin
 N8N_PASSWORD=<password>
+MAX_BATCHES=0                     # 0 = no limit; set to 1 to conserve NotebookLM quota
 ```
 
 ```bash
 # .env.example  (committed)
 ANTHROPIC_API_KEY=
 USE_DEV_CLIENT=false
+USE_MOCK_GENERATE=false
 FEED_TOKEN=
 HOST_LAN_IP=
 FEED_TITLE=DE Daily
 N8N_USER=admin
 N8N_PASSWORD=
+MAX_BATCHES=0
 ```
 
 ---
@@ -526,11 +536,33 @@ n8n and the pipeline container are on the same Docker network, so `http://pipeli
 
 ## Phone Setup
 
-1. Find Windows machine's LAN IP: `ipconfig` → look for IPv4 under your network adapter
-2. Set a static IP or DHCP reservation in your router for that MAC address
-3. Verify feed is reachable from phone browser: `http://192.168.1.x:8000/feed.xml`
-4. In Overcast → Add Feed → paste that URL
-5. Episodes appear after morning sync on home WiFi
+Use **Apple Podcasts** — not Overcast or Pocket Casts. Those apps use cloud-based feed fetchers that can't reach Tailscale addresses. Apple Podcasts fetches directly from your device.
+
+1. Install Tailscale on your phone and sign in to the same account as your PC
+2. Find your PC's Tailscale IP: `tailscale ip -4` (starts with `100.`)
+3. Set `HOST_LAN_IP` to this Tailscale IP in `.env`
+4. Allow inbound TCP on port 8000 from the Tailscale subnet in Windows Firewall:
+   ```powershell
+   New-NetFirewallRule -DisplayName "DE Podcast Feed" -Direction Inbound `
+     -Protocol TCP -LocalPort 8000 -RemoteAddress 100.64.0.0/10 -Action Allow
+   ```
+5. Verify the feed is reachable from your phone's browser: `http://<tailscale-ip>:8000/feed.xml`
+6. In Apple Podcasts → **Listen Now** → **Follow a Show** → paste that URL
+7. Episodes appear after the morning run syncs to the feed
+
+---
+
+## Testing
+
+```bash
+# Unit tests — no Docker required
+pytest --ignore=tests/integration
+
+# Integration tests — requires full stack running (USE_MOCK_GENERATE=true recommended)
+pytest tests/integration/ --integration
+```
+
+CI (`.github/workflows/ci.yml`) runs both: the unit job has no external dependencies; the integration job starts the stack with `USE_MOCK_GENERATE=true` to avoid consuming NotebookLM quota.
 
 ---
 
@@ -633,7 +665,7 @@ Implemented in step 4 (pipeline wiring).
 
 ## Build Order
 
-1. **Feed container** — get `feed/` running, verify `feed.xml` is reachable on LAN, add to Overcast
+1. **Feed container** — get `feed/` running, verify `feed.xml` is reachable via Tailscale, add to Apple Podcasts
 2. **Discovery** — `discovery.py` pulling and deduping articles from all sources
 3. **Ranking + Clustering** — Claude Haiku calls, validate JSON output quality manually
 3b. **Feedback loop** — `feedback.py`, update `ranking.py` with few-shot injection, `/feedback/{id}` endpoint + confirmation template, update feed description template, `/admin/feedback` view
