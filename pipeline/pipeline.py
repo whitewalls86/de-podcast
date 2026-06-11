@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_SOURCES = Path("sources.json")
 _DEFAULT_SEEN = Path("data/seen_urls.json")
+_DEFAULT_LAST_RUN = Path("data/last_run.json")
 
 GenerateFn = Callable[[str, str, list[str]], Awaitable[str]]
 
@@ -27,10 +29,24 @@ def _save_seen(seen_path: Path, urls: set[str]) -> None:
     seen_path.write_text(json.dumps(sorted(urls)))
 
 
+def _write_last_run(path: Path, result: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "status": result["status"],
+                "batches": [b["title"] for b in result.get("batches", [])],
+            }
+        )
+    )
+
+
 async def run_pipeline(
     *,
     sources_path: Path = _DEFAULT_SOURCES,
     seen_path: Path = _DEFAULT_SEEN,
+    last_run_path: Path = _DEFAULT_LAST_RUN,
     generate_fn: GenerateFn | None = None,
 ) -> dict[str, Any]:
     if generate_fn is None:
@@ -47,7 +63,9 @@ async def run_pipeline(
 
     if len(ranked) < 2:
         logger.info("Only %d ranked article(s) after dedup — skipping clustering", len(ranked))
-        return {"status": "noop", "batches": [], "articles_seen": 0}
+        result = {"status": "noop", "batches": [], "articles_seen": 0}
+        _write_last_run(last_run_path, result)
+        return result
 
     clusters = await cluster(ranked)
 
@@ -73,4 +91,6 @@ async def run_pipeline(
     else:
         status = "success"
 
-    return {"status": status, "batches": batches, "articles_seen": len(seen_to_add)}
+    result = {"status": status, "batches": batches, "articles_seen": len(seen_to_add)}
+    _write_last_run(last_run_path, result)
+    return result

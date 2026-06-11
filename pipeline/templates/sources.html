@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Sources — Pipeline Admin{% endblock %}
+{% block content %}
+<h1>Sources</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Name</th><th>URL</th><th>Type</th><th>Active</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sources %}
+    <tr id="row-{{ s.id }}">
+      <td>{{ s.name }}</td>
+      <td><a href="{{ s.url }}" target="_blank">{{ s.url }}</a></td>
+      <td>{{ s.type }}</td>
+      <td>{{ "yes" if s.active else "no" }}</td>
+      <td>
+        <button onclick="toggleSource('{{ s.id }}')">Toggle</button>
+        <button onclick="deleteSource('{{ s.id }}')">Delete</button>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">No sources configured.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Add Source</h2>
+<form method="post" action="/admin/sources">
+  <label>Name: <input name="name" required></label>
+  <label>URL: <input name="url" type="url" required></label>
+  <label>Type:
+    <select name="type">
+      <option value="rss">rss</option>
+      <option value="hn">hn</option>
+    </select>
+  </label>
+  <button type="submit">Add</button>
+</form>
+
+<script>
+function toggleSource(id) {
+  fetch('/admin/sources/' + id, {method: 'PATCH'}).then(() => location.reload());
+}
+function deleteSource(id) {
+  if (!confirm('Delete this source?')) return;
+  fetch('/admin/sources/' + id, {method: 'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}
