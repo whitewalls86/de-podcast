@@ -16,6 +16,7 @@ app = FastAPI()
 app.state.sources_path = Path("sources.json")
 app.state.last_run_path = Path("data/last_run.json")
 app.state.feedback_path = DEFAULT_FEEDBACK
+app.state.seen_urls_path = Path("data/seen_urls.json")
 
 app.include_router(admin_router)
 

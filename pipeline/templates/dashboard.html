@@ -101,6 +101,29 @@ function setAuthMessage(msg) {
 </script>
 
 <section>
+  <h2>Seen URLs</h2>
+  <p>URLs already included in a past episode are filtered out at discovery time. Clear this list to re-discover them (e.g. after a gap in runs).</p>
+  <button onclick="clearSeenUrls()">Clear Seen URLs</button>
+  <p id="seen-urls-message" style="color:#856404"></p>
+</section>
+
+<script>
+async function clearSeenUrls() {
+  document.getElementById("seen-urls-message").textContent = "Clearing…";
+  try {
+    const r = await fetch("/admin/seen-urls", {method: "DELETE"});
+    if (r.status === 204) {
+      document.getElementById("seen-urls-message").textContent = "Seen URLs cleared.";
+    } else {
+      document.getElementById("seen-urls-message").textContent = "Failed (status " + r.status + ").";
+    }
+  } catch (e) {
+    document.getElementById("seen-urls-message").textContent = "Request error: " + e;
+  }
+}
+</script>
+
+<section>
   <h2>Today's Episodes</h2>
   <p><em>Episode list coming in a future step.</em></p>
 </section>
