@@ -6,8 +6,10 @@ from pathlib import Path
 
 try:
     from notebooklm import NotebookLMClient
+    from notebooklm.exceptions import ArtifactInProgressTimeoutError
 except ImportError:  # pragma: no cover - real package only present in the container
     NotebookLMClient = None  # type: ignore[assignment]
+    ArtifactInProgressTimeoutError = Exception  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +39,8 @@ async def _generate_once(title: str, urls: list[str], dest: Path) -> tuple[str, 
                 instructions=f"Practical data engineering techniques. Topic: {title}",
             )
             await asyncio.wait_for(
-                client.artifacts.wait_for_completion(nb.id, status.task_id),
-                timeout=_TIMEOUT_S,
+                client.artifacts.wait_for_completion(nb.id, status.task_id, timeout=_TIMEOUT_S),
+                timeout=_TIMEOUT_S + 30,
             )
             await client.artifacts.download_audio(nb.id, str(dest))
             return str(dest), consumed
@@ -59,6 +61,8 @@ async def generate_episode(batch_key: str, title: str, urls: list[str]) -> tuple
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             return await _generate_once(title, urls, dest)
+        except ArtifactInProgressTimeoutError:
+            raise  # timeout = generation started but took too long; retrying wastes a credit
         except Exception as exc:  # noqa: BLE001 - retried below, re-raised after last attempt
             last_exc = exc
             logger.warning(
