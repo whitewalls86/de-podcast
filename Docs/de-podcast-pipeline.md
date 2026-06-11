@@ -164,7 +164,7 @@ Pulls from the following sources in parallel. Active source list is read from `s
   {"name": "Datafold Blog", "url": "https://www.datafold.com/blog/rss.xml", "type": "rss", "active": true},
   {"name": "DataEngineer.io", "url": "https://dataengineer.io/rss", "type": "rss", "active": true},
   {"name": "Medium DE tag", "url": "https://medium.com/feed/tag/data-engineering", "type": "rss", "active": false},
-  {"name": "Hacker News", "url": "https://hn.algolia.com/api/v1/search", "type": "hn", "active": true},
+  {"name": "Hacker News", "url": "https://hn.algolia.com/api/v1/search_by_date", "type": "hn", "active": true},
   {"name": "r/dataengineering", "url": "https://www.reddit.com/r/dataengineering/top/.rss?t=day", "type": "rss", "active": true}
 ]
 ```
@@ -453,12 +453,11 @@ de-podcast/
 │   ├── feedback.py               # read/write feedback.json, build few-shot context
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
-│   ├── utils.py
 │   └── templates/                # Jinja2 HTML templates
 │       ├── base.html
 │       ├── dashboard.html
 │       ├── sources.html
-│       └── feedback_confirm.html # mobile vote confirmation page
+│       └── feedback.html         # feedback history view (vote confirmation is inline HTML)
 │
 ├── feed/
 │   ├── Dockerfile
@@ -505,6 +504,7 @@ HOST_LAN_IP=
 FEED_TITLE=DE Daily
 N8N_USER=admin
 N8N_PASSWORD=
+MAX_BATCHES=0
 ```
 
 ---
