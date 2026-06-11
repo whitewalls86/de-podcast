@@ -61,7 +61,7 @@ async def test_dedup_filters_seen_urls(tmp_path):
 
     captured = {}
 
-    async def capturing_rank(articles):
+    async def capturing_rank(articles, **kwargs):
         captured["urls"] = [a["url"] for a in articles]
         return _RANKED
 

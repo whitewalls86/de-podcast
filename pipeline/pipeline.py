@@ -8,6 +8,7 @@ from typing import Any
 
 from pipeline.clustering import cluster
 from pipeline.discovery import discover
+from pipeline.feedback import DEFAULT_FEEDBACK
 from pipeline.ranking import rank
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ async def run_pipeline(
     sources_path: Path = _DEFAULT_SOURCES,
     seen_path: Path = _DEFAULT_SEEN,
     last_run_path: Path = _DEFAULT_LAST_RUN,
+    feedback_path: Path = DEFAULT_FEEDBACK,
     generate_fn: GenerateFn | None = None,
 ) -> dict[str, Any]:
     if generate_fn is None:
@@ -67,7 +69,7 @@ async def run_pipeline(
     articles = await discover(sources_path)
     articles = [a for a in articles if a["url"] not in seen_urls]
 
-    ranked = await rank(articles)
+    ranked = await rank(articles, feedback_path=feedback_path)
 
     if len(ranked) < 2:
         logger.info("Only %d ranked article(s) after dedup — skipping clustering", len(ranked))

@@ -69,8 +69,8 @@ async def feedback_vote(
 
 
 @app.post("/pipeline/run")
-async def pipeline_run():
-    result = await run_pipeline()
+async def pipeline_run(request: Request):
+    result = await run_pipeline(feedback_path=request.app.state.feedback_path)
     if result["status"] == "failed":
         raise HTTPException(status_code=500, detail=result)
     return result
