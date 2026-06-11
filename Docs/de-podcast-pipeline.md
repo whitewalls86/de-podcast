@@ -617,9 +617,7 @@ USE_DEV_CLIENT=true python scripts/test_pipeline.py
 
 Discovery uses a rolling 48-hour window, so an article published at 9am Monday is a candidate on both the Monday and Tuesday runs. Without cross-run state, a high-scoring article can appear in two consecutive podcasts.
 
-**Mechanism:** a `data/seen_urls.json` file (Docker volume, persisted across runs) tracks every URL that made it into a final podcast. At the start of each run, `discover()` filters out any URL already in that file. At the end of a successful run, the pipeline appends the URLs from both batches.
-
-The file is written only on success — if NotebookLM generation fails, URLs are not marked seen, so they remain candidates for the next run rather than being silently dropped.
+**Mechanism:** a `data/seen_urls.json` file (Docker volume, persisted across runs) tracks every URL that made it into a final podcast. At the start of each run, `discover()` filters out any URL already in that file. URLs are written per successfully generated batch — if a batch's episode is produced, its URLs are marked seen; if a batch fails, its URLs are left out of `seen_urls.json` so they remain candidates for the next run rather than being silently dropped.
 
 ```
 data/seen_urls.json  →  ["https://...", "https://...", ...]
