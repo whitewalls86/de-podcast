@@ -145,6 +145,15 @@ async def test_invalid_json_raises(monkeypatch):
             await rank(articles)
 
 
+async def test_truncated_fenced_json_raises_clearly(monkeypatch):
+    # Simulates Anthropic truncating mid-response (no closing fence, incomplete JSON)
+    articles = make_articles(2)
+    truncated = '```json\n[{"url": "http://example.com/0", "score": 0.9'
+    with patch("pipeline.ranking.get_anthropic_client", return_value=mock_client(truncated)):
+        with pytest.raises(ValueError, match="invalid JSON"):
+            await rank(articles)
+
+
 async def test_empty_articles_skips_api_call():
     result = await rank([])
     assert result == []

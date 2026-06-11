@@ -14,8 +14,8 @@ You are a data engineering content curator. Score each article from 0.0 to 1.0 b
 - Novelty: new releases, new techniques, not rehashed basics
 - Source credibility
 
-Return ONLY a JSON array, no commentary:
-[{"url": "...", "score": 0.92, "topic_tags": ["dbt", "testing"], "reason": "one sentence"}, ...]
+Return ONLY a JSON array. No commentary, no markdown fences, no explanation.
+Compact format: [{"url":"...","score":0.92,"topic_tags":["dbt","testing"]}, ...]
 """
 
 
@@ -37,7 +37,7 @@ async def rank(articles: list[dict], *, feedback_path: Path = DEFAULT_FEEDBACK) 
     client = get_anthropic_client()
     response = await client.messages.create(
         model=_MODEL,
-        max_tokens=2048,
+        max_tokens=4096,
         system=_SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
