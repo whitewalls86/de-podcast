@@ -100,7 +100,7 @@ async def _fetch_hn(source: dict, *, hn_query: str) -> list[dict]:
     return results
 
 
-async def discover(sources_path: Path, *, hn_query: str = "data engineering") -> list[dict]:
+async def discover(sources_path: Path, *, hn_query: str) -> list[dict]:
     sources = json.loads(sources_path.read_text())
     active = [s for s in sources if s.get("active", True)]
 
