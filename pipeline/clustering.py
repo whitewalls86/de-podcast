@@ -52,8 +52,17 @@ async def cluster(articles: list[dict]) -> dict:
         )
 
     # Remap any URLs Claude normalized (e.g. _ → -) back to the canonical input URLs.
+    # Only remap when the normalized key is unambiguous (maps to exactly one input URL).
     input_urls = {a["url"] for a in articles}
-    norm_to_canonical = {u.lower().replace("-", "_"): u for u in input_urls}
+    norm_counts: dict[str, int] = {}
+    for u in input_urls:
+        key = u.lower().replace("-", "_")
+        norm_counts[key] = norm_counts.get(key, 0) + 1
+    norm_to_canonical = {
+        u.lower().replace("-", "_"): u
+        for u in input_urls
+        if norm_counts[u.lower().replace("-", "_")] == 1
+    }
     for batch in result.values():
         if isinstance(batch, dict) and isinstance(batch.get("urls"), list):
             batch["urls"] = [

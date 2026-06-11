@@ -88,6 +88,25 @@ async def test_url_normalization_remaps_claude_modified_urls(monkeypatch):
     assert normalized not in result["batch_a"]["urls"]
 
 
+async def test_url_normalization_skipped_when_ambiguous(monkeypatch):
+    # Two input URLs that normalize to the same key — neither should be remapped.
+    url_a = "https://reddit.com/r/de/comments/abc/my_article/"
+    url_b = "https://reddit.com/r/de/comments/abc/my-article/"
+    articles = make_articles([url_a, url_b])
+    cluster_result = {
+        "batch_a": {"title": "A", "urls": [url_a]},
+        "batch_b": {"title": "B", "urls": [url_b]},
+    }
+    with patch(
+        "pipeline.clustering.get_anthropic_client",
+        return_value=mock_client(json.dumps(cluster_result)),
+    ):
+        result = await cluster(articles)
+    # Both URLs survive unchanged — no silent remapping
+    assert url_a in result["batch_a"]["urls"]
+    assert url_b in result["batch_b"]["urls"]
+
+
 async def test_fenced_json_is_parsed(monkeypatch):
     urls = ["http://example.com/1", "http://example.com/2"]
     articles = make_articles(urls)
