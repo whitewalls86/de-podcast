@@ -19,18 +19,18 @@ def _episodes_dir() -> Path:
     return Path(os.environ.get("EPISODES_DIR", "/app/episodes"))
 
 
-async def _generate_once(title: str, urls: list[str], dest: Path) -> str:
+async def _generate_once(title: str, urls: list[str], dest: Path) -> tuple[str, list[str]]:
     async with NotebookLMClient.from_storage() as client:
         nb = await client.notebooks.create(f"DE Daily - {title}")
         try:
-            added = 0
+            consumed: list[str] = []
             for url in urls:
                 try:
                     await client.sources.add_url(nb.id, url, wait=True)
-                    added += 1
+                    consumed.append(url)
                 except Exception as url_exc:  # noqa: BLE001
                     logger.warning("Skipping unaddable source %s: %s", url, url_exc)
-            if added == 0:
+            if not consumed:
                 raise RuntimeError("No sources could be added to the notebook")
             status = await client.artifacts.generate_audio(
                 nb.id,
@@ -41,14 +41,16 @@ async def _generate_once(title: str, urls: list[str], dest: Path) -> str:
                 timeout=_TIMEOUT_S,
             )
             await client.artifacts.download_audio(nb.id, str(dest))
-            return str(dest)
+            return str(dest), consumed
         finally:
             await client.notebooks.delete(nb.id)
 
 
-async def generate_episode(batch_key: str, title: str, urls: list[str]) -> str:
+async def generate_episode(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
     """Create an ephemeral NotebookLM notebook, generate the audio overview,
-    download it to EPISODES_DIR, and delete the notebook. Returns the MP3 path."""
+    download it to EPISODES_DIR, and delete the notebook.
+    Returns (mp3_path, consumed_urls) where consumed_urls are those NotebookLM
+    successfully added — skipped URLs are not marked seen and will be retried."""
     today_utc = datetime.now(UTC).strftime("%Y-%m-%d")
     dest = _episodes_dir() / f"{batch_key}-{today_utc}.mp3"
     dest.parent.mkdir(parents=True, exist_ok=True)

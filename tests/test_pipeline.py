@@ -17,8 +17,8 @@ _CLUSTERS = {
 }
 
 
-async def _fake_generate(batch_key: str, title: str, urls: list[str]) -> str:
-    return f"data/{batch_key}.mp3"
+async def _fake_generate(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
+    return f"data/{batch_key}.mp3", urls
 
 
 def _patch_stages(articles=_ARTICLES, ranked=_RANKED, clusters=_CLUSTERS):
@@ -130,7 +130,7 @@ async def test_partial_failure_does_not_block_other_batch(tmp_path):
     async def fail_batch_a(batch_key, title, urls):
         if batch_key == "batch_a":
             raise RuntimeError("batch_a failed")
-        return f"data/{batch_key}.mp3"
+        return f"data/{batch_key}.mp3", urls
 
     patches = _patch_stages()
     for p in patches:
