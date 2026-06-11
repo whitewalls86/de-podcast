@@ -91,16 +91,23 @@ def test_validate_ranking_criteria_not_list_raises():
         validate_topic(data)
 
 
-def test_validate_ranking_criteria_with_empty_item_raises():
+def test_validate_ranking_criteria_empty_items_are_stripped():
     data = _valid_topic(ranking_criteria=["good criterion", ""])
+    result = validate_topic(data)
+    assert result["ranking_criteria"] == ["good criterion"]
+
+
+def test_validate_ranking_criteria_only_empty_items_raises():
+    data = _valid_topic(ranking_criteria=["", "   "])
     with pytest.raises(ValueError, match="'ranking_criteria'"):
         validate_topic(data)
 
 
-def test_validate_valid_topic_returns_data():
+def test_validate_valid_topic_returns_cleaned_dict():
     data = _valid_topic()
     result = validate_topic(data)
-    assert result is data
+    assert result == data
+    assert result is not data
 
 
 # --- save_topic ---

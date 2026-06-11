@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 
@@ -20,29 +21,33 @@ _REQUIRED_STR_FIELDS = ("name", "short_name", "feed_title", "hn_query", "generat
 
 
 def validate_topic(data: dict) -> dict:
+    cleaned: dict = {}
     for field in _REQUIRED_STR_FIELDS:
         if field not in data:
             raise ValueError(f"topic.json field {field!r}: missing")
         val = data[field]
         if not isinstance(val, str) or not val.strip():
             raise ValueError(f"topic.json field {field!r}: must be a non-empty string")
+        cleaned[field] = val.strip()
 
     criteria = data.get("ranking_criteria")
     if criteria is None:
         raise ValueError("topic.json field 'ranking_criteria': missing")
     if not isinstance(criteria, list):
         raise ValueError("topic.json field 'ranking_criteria': must be a list of strings")
-    if not criteria or not all(isinstance(c, str) and c.strip() for c in criteria):
+    stripped = [c.strip() for c in criteria if isinstance(c, str) and c.strip()]
+    if not stripped:
         raise ValueError(
             "topic.json field 'ranking_criteria': must contain at least one non-empty string"
         )
+    cleaned["ranking_criteria"] = stripped
 
-    return data
+    return cleaned
 
 
 def load_topic(path: Path = Path("topic.json")) -> dict:
     if not path.exists():
-        return dict(DEFAULT_TOPIC)
+        return copy.deepcopy(DEFAULT_TOPIC)
     data = json.loads(path.read_text())
     validate_topic(data)
     return data
