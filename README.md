@@ -30,4 +30,5 @@ See `Docs/de-podcast-pipeline.md` for full architecture and step-by-step build o
 
 ## Cost
 
-~$0.03/month (Claude Haiku for ranking/clustering; everything else free).
+~$0.20/month (Claude Haiku for ranking/clustering; everything else free).
+Measured: ~$0.005/run on a typical day (ranking ~1,400 input + ~500 output tokens; clustering ~400 input + ~170 output tokens).

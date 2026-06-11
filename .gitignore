@@ -25,6 +25,7 @@ notebooklm_auth/
 # Local scripts (except committed smoke tests)
 scripts/*
 !scripts/test_pipeline.py
+!scripts/cost_analysis.py
 
 # Graphify local outputs
 graphify-out/

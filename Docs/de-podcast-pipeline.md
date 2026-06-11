@@ -538,7 +538,7 @@ n8n and the pipeline container are on the same Docker network, so `http://pipeli
 
 | Component | Cost |
 |---|---|
-| Claude Haiku (ranking + clustering) | ~$0.03/month |
+| Claude Haiku (ranking + clustering) | ~$0.20/month (~$0.005/run) |
 | NotebookLM audio generation | $0 (free tier) |
 | Infrastructure | $0 (local Docker) |
 | **Total** | **~$0.03/month** |
