@@ -26,19 +26,20 @@
 
 ## Import via API
 
+First create an API key in n8n: **Settings → API → Create an API Key**. Copy the key, then:
+
 ```bash
 curl -X POST http://localhost:5678/api/v1/workflows \
   -H "Content-Type: application/json" \
-  -u "${N8N_USER}:${N8N_PASSWORD}" \
+  -H "X-N8N-API-KEY: ${N8N_API_KEY}" \
   -d @n8n/pipeline-workflow.json
 ```
 
-After importing, activate it:
+After importing, activate it using the workflow ID returned by the import response:
 
 ```bash
-# Get the workflow ID from the import response, then:
 curl -X PATCH http://localhost:5678/api/v1/workflows/<id>/activate \
-  -u "${N8N_USER}:${N8N_PASSWORD}"
+  -H "X-N8N-API-KEY: ${N8N_API_KEY}"
 ```
 
 ## Configure Email Alerts
