@@ -11,11 +11,14 @@ from pipeline.sources import add_source
 def admin_paths(tmp_path):
     prev_sources = getattr(app.state, "sources_path", None)
     prev_last_run = getattr(app.state, "last_run_path", None)
+    prev_feedback = getattr(app.state, "feedback_path", None)
     app.state.sources_path = tmp_path / "sources.json"
     app.state.last_run_path = tmp_path / "last_run.json"
+    app.state.feedback_path = tmp_path / "feedback.json"
     yield tmp_path
     app.state.sources_path = prev_sources
     app.state.last_run_path = prev_last_run
+    app.state.feedback_path = prev_feedback
 
 
 @pytest.fixture
@@ -118,7 +121,37 @@ def test_toggle_source_missing_returns_404(client):
     assert r.status_code == 404
 
 
-def test_feedback_page(client):
+def test_feedback_page_no_file_renders_cleanly(client):
     r = client.get("/admin/feedback")
     assert r.status_code == 200
-    assert "coming" in r.text.lower()
+    assert "👍 0" in r.text
+    assert "👎 0" in r.text
+
+
+def test_feedback_page_with_entries_shows_counts_and_tags(admin_paths):
+    feedback = admin_paths / "feedback.json"
+    entries = [
+        {
+            "episode_id": "ep-1",
+            "title": "dbt Best Practices",
+            "topic_tags": ["dbt", "testing"],
+            "article_urls": [],
+            "vote": "up",
+            "timestamp": "2026-06-10T08:00:00Z",
+        },
+        {
+            "episode_id": "ep-2",
+            "title": "SQL Basics",
+            "topic_tags": ["sql"],
+            "article_urls": [],
+            "vote": "down",
+            "timestamp": "2026-06-10T09:00:00Z",
+        },
+    ]
+    feedback.write_text(json.dumps(entries))
+    r = TestClient(app).get("/admin/feedback")
+    assert r.status_code == 200
+    assert "👍 1" in r.text
+    assert "👎 1" in r.text
+    assert "dbt" in r.text
+    assert "sql" in r.text

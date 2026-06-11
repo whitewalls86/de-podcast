@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Any
 
 from pipeline.clustering import cluster
 from pipeline.discovery import discover
+from pipeline.feedback import DEFAULT_FEEDBACK
 from pipeline.ranking import rank
 
 logger = logging.getLogger(__name__)
@@ -16,6 +18,13 @@ _DEFAULT_SEEN = Path("data/seen_urls.json")
 _DEFAULT_LAST_RUN = Path("data/last_run.json")
 
 GenerateFn = Callable[[str, str, list[str]], Awaitable[str]]
+
+
+def _slugify(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_]+", "-", text)
+    return re.sub(r"-+", "-", text).strip("-")
 
 
 def _load_seen(seen_path: Path) -> set[str]:
@@ -47,6 +56,7 @@ async def run_pipeline(
     sources_path: Path = _DEFAULT_SOURCES,
     seen_path: Path = _DEFAULT_SEEN,
     last_run_path: Path = _DEFAULT_LAST_RUN,
+    feedback_path: Path = DEFAULT_FEEDBACK,
     generate_fn: GenerateFn | None = None,
 ) -> dict[str, Any]:
     if generate_fn is None:
@@ -59,7 +69,7 @@ async def run_pipeline(
     articles = await discover(sources_path)
     articles = [a for a in articles if a["url"] not in seen_urls]
 
-    ranked = await rank(articles)
+    ranked = await rank(articles, feedback_path=feedback_path)
 
     if len(ranked) < 2:
         logger.info("Only %d ranked article(s) after dedup — skipping clustering", len(ranked))
@@ -69,12 +79,14 @@ async def run_pipeline(
 
     clusters = await cluster(ranked)
 
+    today_utc = datetime.now(UTC).strftime("%Y-%m-%d")
     batches = []
     seen_to_add: set[str] = set()
     for batch_key, batch in clusters.items():
         try:
             mp3_path = await generate_fn(batch_key, batch["title"], batch["urls"])
-            batches.append({"title": batch["title"], "mp3": mp3_path})
+            episode_id = f"{_slugify(batch['title'])}-{today_utc}"
+            batches.append({"title": batch["title"], "mp3": mp3_path, "episode_id": episode_id})
             seen_to_add.update(batch["urls"])
         except Exception:
             logger.exception(

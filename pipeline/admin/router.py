@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -6,6 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from pipeline.auth import get_auth_status
+from pipeline.feedback import load_feedback
 from pipeline.sources import add_source, list_sources, remove_source, toggle_source
 
 router = APIRouter(prefix="/admin")
@@ -67,4 +69,19 @@ async def toggle_source_route(id: str, request: Request):
 
 @router.get("/feedback", response_class=HTMLResponse)
 async def feedback_page(request: Request):
-    return templates.TemplateResponse(request, "feedback.html")
+    entries = load_feedback(path=request.app.state.feedback_path)
+    up = [e for e in entries if e.get("vote") == "up"]
+    down = [e for e in entries if e.get("vote") == "down"]
+    liked_tags = Counter(t for e in up for t in (e.get("topic_tags") or []))
+    disliked_tags = Counter(t for e in down for t in (e.get("topic_tags") or []))
+    return templates.TemplateResponse(
+        request,
+        "feedback.html",
+        {
+            "entries": entries[:50],
+            "up_count": len(up),
+            "down_count": len(down),
+            "liked_tags": liked_tags.most_common(5),
+            "disliked_tags": disliked_tags.most_common(5),
+        },
+    )

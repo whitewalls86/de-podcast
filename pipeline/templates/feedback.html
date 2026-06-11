@@ -2,5 +2,58 @@
 {% block title %}Feedback — Pipeline Admin{% endblock %}
 {% block content %}
 <h1>Feedback History</h1>
-<p>Feedback history — coming in step 3b.</p>
+
+<p>
+  <strong>👍 {{ up_count }}</strong> liked &nbsp;/&nbsp; <strong>👎 {{ down_count }}</strong> disliked
+</p>
+
+{% if liked_tags or disliked_tags %}
+<div style="display:flex; gap:2rem; margin-bottom:1.5rem;">
+  {% if liked_tags %}
+  <div>
+    <h3>Top liked topics</h3>
+    <ul>
+      {% for tag, count in liked_tags %}
+      <li>{{ tag }} ({{ count }})</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% if disliked_tags %}
+  <div>
+    <h3>Top disliked topics</h3>
+    <ul>
+      {% for tag, count in disliked_tags %}
+      <li>{{ tag }} ({{ count }})</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if entries %}
+<table>
+  <thead>
+    <tr>
+      <th>Timestamp</th>
+      <th>Title</th>
+      <th>Vote</th>
+      <th>Tags</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td>{{ e.timestamp }}</td>
+      <td>{{ e.title }}</td>
+      <td>{% if e.vote == "up" %}👍{% else %}👎{% endif %}</td>
+      <td>{{ e.topic_tags | join(", ") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No feedback recorded yet.</p>
+{% endif %}
 {% endblock %}

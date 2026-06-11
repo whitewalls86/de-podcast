@@ -61,7 +61,7 @@ async def test_dedup_filters_seen_urls(tmp_path):
 
     captured = {}
 
-    async def capturing_rank(articles):
+    async def capturing_rank(articles, **kwargs):
         captured["urls"] = [a["url"] for a in articles]
         return _RANKED
 
@@ -172,6 +172,37 @@ async def test_fewer_than_two_ranked_returns_no_op(tmp_path):
 
     assert result == {"status": "noop", "batches": [], "articles_seen": 0}
     assert not seen.exists()
+
+
+async def test_feedback_path_forwarded_to_rank(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    custom_feedback = tmp_path / "custom_feedback.json"
+    captured = {}
+
+    async def capturing_rank(articles, **kwargs):
+        captured["feedback_path"] = kwargs.get("feedback_path")
+        return _RANKED
+
+    patches = [
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=capturing_rank),
+        patch("pipeline.pipeline.cluster", new=AsyncMock(return_value=_CLUSTERS)),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(
+            sources_path=sources,
+            seen_path=tmp_path / "seen.json",
+            feedback_path=custom_feedback,
+            generate_fn=_fake_generate,
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    assert captured["feedback_path"] == custom_feedback
 
 
 async def test_seen_file_created_if_absent(tmp_path):

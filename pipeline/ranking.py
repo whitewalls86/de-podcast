@@ -1,6 +1,8 @@
 import json
+from pathlib import Path
 
 from pipeline.dev_client import get_anthropic_client
+from pipeline.feedback import DEFAULT_FEEDBACK, build_few_shot_context
 
 _MODEL = "claude-haiku-4-5-20251001"
 
@@ -17,12 +19,20 @@ Return ONLY a JSON array, no commentary:
 """
 
 
-async def rank(articles: list[dict]) -> list[dict]:
+def build_ranking_prompt(articles: list[dict], few_shot_context: str) -> str:
+    items = [{"url": a["url"], "title": a["title"], "snippet": a["snippet"]} for a in articles]
+    article_block = f"Score these articles:\n{json.dumps(items, indent=2)}"
+    if few_shot_context:
+        return f"{few_shot_context}\n\n{article_block}"
+    return article_block
+
+
+async def rank(articles: list[dict], *, feedback_path: Path = DEFAULT_FEEDBACK) -> list[dict]:
     if not articles:
         return []
 
-    items = [{"url": a["url"], "title": a["title"], "snippet": a["snippet"]} for a in articles]
-    user_msg = f"Score these articles:\n{json.dumps(items, indent=2)}"
+    few_shot = build_few_shot_context(path=feedback_path)
+    user_msg = build_ranking_prompt(articles, few_shot)
 
     client = get_anthropic_client()
     response = await client.messages.create(
