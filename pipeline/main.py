@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from pipeline.admin import router as admin_router
+from pipeline.auth import get_auth_status, refresh_auth, start_reauth
 from pipeline.feedback import DEFAULT_FEEDBACK, record_vote
 from pipeline.pipeline import run_pipeline
 
@@ -74,6 +75,21 @@ async def pipeline_run(request: Request):
     if result["status"] == "failed":
         raise HTTPException(status_code=500, detail=result)
     return result
+
+
+@app.get("/auth/status")
+async def auth_status():
+    return get_auth_status()
+
+
+@app.post("/auth/refresh")
+async def auth_refresh():
+    return await refresh_auth()
+
+
+@app.post("/auth/reauth")
+async def auth_reauth():
+    return await start_reauth()
 
 
 @app.get("/health")
