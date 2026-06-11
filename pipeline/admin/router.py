@@ -8,7 +8,9 @@ from fastapi.templating import Jinja2Templates
 
 from pipeline.auth import get_auth_status
 from pipeline.feedback import load_feedback
+from pipeline.pinned import add_pinned, load_pinned, remove_pinned
 from pipeline.sources import add_source, list_sources, remove_source, toggle_source
+from pipeline.topic import load_topic, save_topic
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -33,7 +35,10 @@ async def dashboard(request: Request):
 @router.get("/sources", response_class=HTMLResponse)
 async def sources_page(request: Request):
     sources = list_sources(request.app.state.sources_path)
-    return templates.TemplateResponse(request, "sources.html", {"sources": sources})
+    pinned = load_pinned(request.app.state.pinned_path)
+    return templates.TemplateResponse(
+        request, "sources.html", {"sources": sources, "pinned": pinned}
+    )
 
 
 @router.post("/sources")
@@ -67,11 +72,69 @@ async def toggle_source_route(id: str, request: Request):
     return JSONResponse(source)
 
 
+@router.post("/pinned")
+async def add_pinned_route(
+    request: Request,
+    url: str = Form(...),
+    title: str = Form(...),
+):
+    try:
+        add_pinned(url, title, path=request.app.state.pinned_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return RedirectResponse(url="/admin/sources", status_code=303)
+
+
+@router.delete("/pinned/{id}", status_code=204)
+async def delete_pinned_route(id: str, request: Request):
+    try:
+        remove_pinned(id, path=request.app.state.pinned_path)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Pinned entry {id!r} not found")
+
+
 @router.delete("/seen-urls", status_code=204)
 async def clear_seen_urls(request: Request):
     path = request.app.state.seen_urls_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[]")
+
+
+@router.get("/topic", response_class=HTMLResponse)
+async def topic_page(request: Request):
+    topic = load_topic(request.app.state.topic_path)
+    return templates.TemplateResponse(request, "topic.html", {"topic": topic, "error": None})
+
+
+@router.post("/topic")
+async def save_topic_route(
+    request: Request,
+    name: str = Form(...),
+    short_name: str = Form(...),
+    feed_title: str = Form(...),
+    hn_query: str = Form(...),
+    ranking_criteria: str = Form(...),
+    generation_instructions: str = Form(...),
+):
+    criteria = [c.strip() for c in ranking_criteria.splitlines() if c.strip()]
+    data = {
+        "name": name,
+        "short_name": short_name,
+        "feed_title": feed_title,
+        "hn_query": hn_query,
+        "ranking_criteria": criteria,
+        "generation_instructions": generation_instructions,
+    }
+    try:
+        save_topic(data, path=request.app.state.topic_path)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "topic.html",
+            {"topic": data, "error": str(exc)},
+            status_code=422,
+        )
+    return RedirectResponse(url="/admin/topic", status_code=303)
 
 
 @router.get("/feedback", response_class=HTMLResponse)

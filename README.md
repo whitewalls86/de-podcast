@@ -38,6 +38,8 @@ N8N_PASSWORD=<choose-a-password>
 
 `HOST_LAN_IP` must be your **Tailscale IP** (starts with `100.`), not your LAN IP — podcast apps on your phone use cloud fetchers that can't reach plain LAN addresses.
 
+> **Note:** `FEED_TITLE` in `.env` and `feed_title` in `config/topic.json` must be changed together. The feed service reads `FEED_TITLE` from the environment directly; it does not consume `topic.feed_title`. Changing only the topic config will leave the podcast app title stale.
+
 ### 2. Open Windows Firewall for port 8000
 
 The feed runs on port 8000. Allow inbound TCP from the Tailscale subnet:

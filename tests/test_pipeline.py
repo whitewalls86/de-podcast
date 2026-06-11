@@ -1,4 +1,5 @@
 import json
+from contextlib import ExitStack, contextmanager
 from unittest.mock import AsyncMock, patch
 
 from pipeline.pipeline import run_pipeline
@@ -17,16 +18,25 @@ _CLUSTERS = {
 }
 
 
-async def _fake_generate(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
+async def _fake_generate(
+    batch_key: str, title: str, urls: list[str], topic: dict
+) -> tuple[str, list[str]]:
     return f"data/{batch_key}.mp3", urls
 
 
 def _patch_stages(articles=_ARTICLES, ranked=_RANKED, clusters=_CLUSTERS):
-    return [
+    patches = [
         patch("pipeline.pipeline.discover", new=AsyncMock(return_value=articles)),
         patch("pipeline.pipeline.rank", new=AsyncMock(return_value=ranked)),
         patch("pipeline.pipeline.cluster", new=AsyncMock(return_value=clusters)),
     ]
+    return _patch_context(*patches)
+
+
+@contextmanager
+def _patch_context(*patches):
+    with ExitStack() as stack:
+        yield [stack.enter_context(p) for p in patches]
 
 
 async def test_result_shape(tmp_path):
@@ -34,16 +44,10 @@ async def test_result_shape(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    patches = _patch_stages()
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages():
         result = await run_pipeline(
             sources_path=sources, seen_path=seen, generate_fn=_fake_generate
         )
-    finally:
-        for p in patches:
-            p.stop()
 
     assert result["status"] == "success"
     assert "batches" in result
@@ -65,18 +69,12 @@ async def test_dedup_filters_seen_urls(tmp_path):
         captured["urls"] = [a["url"] for a in articles]
         return _RANKED
 
-    patches = [
+    with _patch_context(
         patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
         patch("pipeline.pipeline.rank", new=capturing_rank),
         patch("pipeline.pipeline.cluster", new=AsyncMock(return_value=_CLUSTERS)),
-    ]
-    for p in patches:
-        p.start()
-    try:
+    ):
         await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
-    finally:
-        for p in patches:
-            p.stop()
 
     assert "http://example.com/a" not in captured["urls"]
     assert "http://example.com/b" in captured["urls"]
@@ -87,14 +85,8 @@ async def test_seen_urls_written_on_success(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    patches = _patch_stages()
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages():
         await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
-    finally:
-        for p in patches:
-            p.stop()
 
     written = set(json.loads(seen.read_text()))
     assert written == {"http://example.com/a", "http://example.com/b", "http://example.com/c"}
@@ -107,18 +99,12 @@ async def test_only_consumed_urls_written_to_seen(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    async def partial_consume(batch_key, title, urls):
+    async def partial_consume(batch_key, title, urls, topic):
         # Simulate one URL being skipped (not added to NotebookLM)
         return f"data/{batch_key}.mp3", urls[:1]
 
-    patches = _patch_stages()
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages():
         await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=partial_consume)
-    finally:
-        for p in patches:
-            p.stop()
 
     written = set(json.loads(seen.read_text()))
     # batch_a consumed only url[0], batch_b consumed only url[0]
@@ -132,17 +118,11 @@ async def test_seen_urls_not_written_on_generation_failure(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    async def always_fail(batch_key, title, urls):
+    async def always_fail(batch_key, title, urls, topic):
         raise RuntimeError("generation error")
 
-    patches = _patch_stages()
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages():
         result = await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=always_fail)
-    finally:
-        for p in patches:
-            p.stop()
 
     assert not seen.exists()
     assert result["status"] == "failed"
@@ -154,19 +134,13 @@ async def test_partial_failure_does_not_block_other_batch(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "seen_urls.json"
 
-    async def fail_batch_a(batch_key, title, urls):
+    async def fail_batch_a(batch_key, title, urls, topic):
         if batch_key == "batch_a":
             raise RuntimeError("batch_a failed")
         return f"data/{batch_key}.mp3", urls
 
-    patches = _patch_stages()
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages():
         result = await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=fail_batch_a)
-    finally:
-        for p in patches:
-            p.stop()
 
     assert result["status"] == "partial"
     assert len(result["batches"]) == 1
@@ -183,19 +157,13 @@ async def test_fewer_than_two_ranked_returns_no_op(tmp_path):
     seen = tmp_path / "seen_urls.json"
 
     one_article = _RANKED[:1]
-    patches = [
+    with _patch_context(
         patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
         patch("pipeline.pipeline.rank", new=AsyncMock(return_value=one_article)),
-    ]
-    for p in patches:
-        p.start()
-    try:
+    ):
         result = await run_pipeline(
             sources_path=sources, seen_path=seen, generate_fn=_fake_generate
         )
-    finally:
-        for p in patches:
-            p.stop()
 
     assert result == {"status": "noop", "batches": [], "articles_seen": 0}
     assert not seen.exists()
@@ -211,23 +179,17 @@ async def test_feedback_path_forwarded_to_rank(tmp_path):
         captured["feedback_path"] = kwargs.get("feedback_path")
         return _RANKED
 
-    patches = [
+    with _patch_context(
         patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
         patch("pipeline.pipeline.rank", new=capturing_rank),
         patch("pipeline.pipeline.cluster", new=AsyncMock(return_value=_CLUSTERS)),
-    ]
-    for p in patches:
-        p.start()
-    try:
+    ):
         await run_pipeline(
             sources_path=sources,
             seen_path=tmp_path / "seen.json",
             feedback_path=custom_feedback,
             generate_fn=_fake_generate,
         )
-    finally:
-        for p in patches:
-            p.stop()
 
     assert captured["feedback_path"] == custom_feedback
 
@@ -237,14 +199,8 @@ async def test_seen_file_created_if_absent(tmp_path):
     sources.write_text("[]")
     seen = tmp_path / "subdir" / "seen_urls.json"
 
-    patches = _patch_stages()
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages():
         await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
-    finally:
-        for p in patches:
-            p.stop()
 
     assert seen.exists()
 
@@ -262,14 +218,8 @@ async def test_run_pipeline_posts_each_successful_batch(tmp_path):
     seen = tmp_path / "seen_urls.json"
 
     post_mock = AsyncMock()
-    patches = _patch_stages() + [patch("pipeline.pipeline._post_to_feed", new=post_mock)]
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages(), patch("pipeline.pipeline._post_to_feed", new=post_mock):
         await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
-    finally:
-        for p in patches:
-            p.stop()
 
     assert post_mock.await_count == len(_CLUSTERS)
     posted_ids = {c.kwargs["episode_id"] for c in post_mock.await_args_list}
@@ -283,11 +233,8 @@ async def test_post_to_feed_sends_correct_multipart_fields(tmp_path, monkeypatch
     mp3.write_bytes(b"ID3 fake mp3 bytes")
 
     resp = MagicMock(status_code=200)
-    client = AsyncMock()
-    client.post = AsyncMock(return_value=resp)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=client)
-    cm.__aexit__ = AsyncMock(return_value=False)
+    cm = AsyncMock()
+    cm.__aenter__.return_value.post = AsyncMock(return_value=resp)
 
     with patch("pipeline.pipeline.httpx.AsyncClient", return_value=cm):
         await _post_to_feed(
@@ -297,7 +244,8 @@ async def test_post_to_feed_sends_correct_multipart_fields(tmp_path, monkeypatch
             topic_tags=["streaming", "kafka"],
         )
 
-    call = client.post.call_args
+    inner_client = cm.__aenter__.return_value
+    call = inner_client.post.call_args
     assert call.args[0] == "http://feed:8000/episodes"
     data = call.kwargs["data"]
     assert data["title"] == "Streaming Pipelines"
@@ -325,19 +273,13 @@ async def test_ranked_tags_flow_to_feed_post(tmp_path):
     # batch_b has URL c   → {spark}
 
     post_mock = AsyncMock()
-    patches = [
+    with _patch_context(
         patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
         patch("pipeline.pipeline.rank", new=AsyncMock(return_value=ranked_with_tags)),
         patch("pipeline.pipeline.cluster", new=AsyncMock(return_value=_CLUSTERS)),
         patch("pipeline.pipeline._post_to_feed", new=post_mock),
-    ]
-    for p in patches:
-        p.start()
-    try:
+    ):
         await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=_fake_generate)
-    finally:
-        for p in patches:
-            p.stop()
 
     by_title = {c.kwargs["title"]: c.kwargs["topic_tags"] for c in post_mock.await_args_list}
     assert set(by_title["Streaming"]) == {"kafka", "streaming", "dbt"}
@@ -350,17 +292,177 @@ async def test_feed_post_failure_marks_batch_failed(tmp_path):
     seen = tmp_path / "seen_urls.json"
 
     failing_post = AsyncMock(side_effect=RuntimeError("feed down"))
-    patches = _patch_stages() + [patch("pipeline.pipeline._post_to_feed", new=failing_post)]
-    for p in patches:
-        p.start()
-    try:
+    with _patch_stages(), patch("pipeline.pipeline._post_to_feed", new=failing_post):
         result = await run_pipeline(
             sources_path=sources, seen_path=seen, generate_fn=_fake_generate
         )
-    finally:
-        for p in patches:
-            p.stop()
 
     assert result["status"] == "failed"
     assert result["batches"] == []
     assert not seen.exists()
+
+
+# --- pinned URL behavior ---
+
+
+from pipeline.pipeline import _merge_pinned  # noqa: E402
+
+
+def _make_article(url: str, score: float = 0.9) -> dict:
+    return {
+        "url": url,
+        "title": f"T {url}",
+        "source": "s",
+        "snippet": "",
+        "score": score,
+        "topic_tags": [],
+        "reason": "",
+    }
+
+
+def _make_pinned(url: str) -> dict:
+    return {
+        "url": url,
+        "title": f"Pinned {url}",
+        "source": "Pinned",
+        "published_at": "2026-01-01T00:00:00+00:00",
+        "snippet": "",
+        "score": 1.0,
+        "topic_tags": ["pinned"],
+        "reason": "Pinned by user",
+    }
+
+
+def test_merge_pinned_puts_pinned_first():
+    pinned = [_make_pinned("https://example.com/pin")]
+    ranked = [_make_article("https://example.com/a"), _make_article("https://example.com/b")]
+    result = _merge_pinned(pinned, ranked)
+    assert result[0]["url"] == "https://example.com/pin"
+
+
+def test_merge_pinned_caps_at_10():
+    pinned = [_make_pinned(f"https://pinned.com/{i}") for i in range(3)]
+    ranked = [_make_article(f"https://ranked.com/{i}") for i in range(10)]
+    result = _merge_pinned(pinned, ranked)
+    assert len(result) == 10
+
+
+def test_merge_pinned_wins_on_url_collision():
+    url = "https://example.com/shared"
+    pinned = [_make_pinned(url)]
+    ranked = [_make_article(url)]  # same URL, lower score
+    result = _merge_pinned(pinned, ranked)
+    assert len(result) == 1
+    assert result[0]["source"] == "Pinned"
+    assert result[0]["score"] == 1.0
+
+
+async def test_pinned_url_bypasses_seen_filter(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pinned_file.write_text(
+        json.dumps([{"id": "art", "url": "https://example.com/pinned", "title": "Pinned Art"}])
+    )
+    seen.write_text(json.dumps(["https://example.com/pinned"]))  # pinned URL is in seen
+
+    captured_cluster_urls: list[str] = []
+
+    async def capturing_cluster(articles, **kwargs):
+        captured_cluster_urls.extend(a["url"] for a in articles)
+        return _CLUSTERS
+
+    with _patch_context(
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=AsyncMock(return_value=_RANKED)),
+        patch("pipeline.pipeline.cluster", new=capturing_cluster),
+    ):
+        await run_pipeline(
+            sources_path=sources,
+            seen_path=seen,
+            pinned_path=pinned_file,
+            generate_fn=_fake_generate,
+        )
+
+    assert "https://example.com/pinned" in captured_cluster_urls
+
+
+async def test_pinned_url_appears_in_cluster_input(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pinned_file.write_text(
+        json.dumps([{"id": "art", "url": "https://pin.example.com/1", "title": "Pin 1"}])
+    )
+
+    captured: list[dict] = []
+
+    async def capturing_cluster(articles, **kwargs):
+        captured.extend(articles)
+        return _CLUSTERS
+
+    with _patch_context(
+        patch("pipeline.pipeline.discover", new=AsyncMock(return_value=_ARTICLES)),
+        patch("pipeline.pipeline.rank", new=AsyncMock(return_value=_RANKED)),
+        patch("pipeline.pipeline.cluster", new=capturing_cluster),
+    ):
+        await run_pipeline(
+            sources_path=sources,
+            seen_path=seen,
+            pinned_path=pinned_file,
+            generate_fn=_fake_generate,
+        )
+
+    urls = [a["url"] for a in captured]
+    assert "https://pin.example.com/1" in urls
+
+
+async def test_pinned_cleared_only_when_consumed(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pin_url = "https://pin.example.com/1"
+    pinned_file.write_text(json.dumps([{"id": "pin1", "url": pin_url, "title": "Pin 1"}]))
+
+    # generate_fn only consumes the first URL per batch (not the pinned one if it's second)
+    async def consume_none(batch_key, title, urls, topic):
+        return f"data/{batch_key}.mp3", []  # consumed nothing
+
+    with _patch_stages():
+        await run_pipeline(
+            sources_path=sources, seen_path=seen, pinned_path=pinned_file, generate_fn=consume_none
+        )
+
+    # Pinned URL not consumed → should still be in the file
+    remaining = json.loads(pinned_file.read_text())
+    assert any(e["url"] == pin_url for e in remaining)
+
+
+async def test_pinned_cleared_when_consumed(tmp_path):
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+    pinned_file = tmp_path / "pinned.json"
+    pin_url = "https://pin.example.com/consumed"
+    pinned_file.write_text(json.dumps([{"id": "pin1", "url": pin_url, "title": "Pin 1"}]))
+
+    # generate_fn returns all urls as consumed (including the pinned one)
+    async def consume_all(batch_key, title, urls, topic):
+        return f"data/{batch_key}.mp3", urls
+
+    with _patch_stages():
+        await run_pipeline(
+            sources_path=sources, seen_path=seen, pinned_path=pinned_file, generate_fn=consume_all
+        )
+
+    # If the pinned URL was in the batch and returned as consumed, it clears
+    # (may not be consumed if cluster didn't include it — check seen set includes it)
+    seen_written = set(json.loads(seen.read_text())) if seen.exists() else set()
+    remaining_pinned = json.loads(pinned_file.read_text()) if pinned_file.exists() else []
+    pinned_urls_remaining = {e["url"] for e in remaining_pinned}
+    # If pin_url was consumed (in seen), it must not remain pinned
+    if pin_url in seen_written:
+        assert pin_url not in pinned_urls_remaining

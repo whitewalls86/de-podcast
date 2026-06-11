@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Topic — Pipeline Admin{% endblock %}
+{% block content %}
+<h1>Topic Configuration</h1>
+
+{% if error %}
+<p style="color: red;">{{ error }}</p>
+{% endif %}
+
+<form method="post" action="/admin/topic">
+  <label>Name:
+    <input name="name" required value="{{ topic.name }}">
+  </label>
+  <label>Short name:
+    <input name="short_name" required value="{{ topic.short_name }}">
+  </label>
+  <label>Feed title:
+    <input name="feed_title" required value="{{ topic.feed_title }}">
+  </label>
+  <label>HN query:
+    <input name="hn_query" required value="{{ topic.hn_query }}">
+  </label>
+  <label>Ranking criteria (one per line):
+    <textarea name="ranking_criteria" rows="6" cols="60" required>{{ topic.ranking_criteria | join('\n') }}</textarea>
+  </label>
+  <label>Generation instructions:
+    <textarea name="generation_instructions" rows="3" cols="60" required>{{ topic.generation_instructions }}</textarea>
+  </label>
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

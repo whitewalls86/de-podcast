@@ -48,5 +48,41 @@ function deleteSource(id) {
   if (!confirm('Delete this source?')) return;
   fetch('/admin/sources/' + id, {method: 'DELETE'}).then(() => location.reload());
 }
+function deletePinned(id) {
+  if (!confirm('Remove this pinned URL?')) return;
+  fetch('/admin/pinned/' + id, {method: 'DELETE'}).then(() => location.reload());
+}
 </script>
+
+<hr>
+<h2>Pinned URLs</h2>
+<p>Pinned URLs are force-added to the next successful run, scored highly, and cleared once ingested.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Title</th><th>URL</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in pinned %}
+    <tr>
+      <td>{{ p.title }}</td>
+      <td><a href="{{ p.url }}" target="_blank">{{ p.url }}</a></td>
+      <td>
+        <button onclick="deletePinned('{{ p.id }}')">Delete</button>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3">No pinned URLs.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3>Pin a URL</h3>
+<form method="post" action="/admin/pinned">
+  <label>URL: <input name="url" type="url" required></label>
+  <label>Title: <input name="title" required></label>
+  <button type="submit">Pin</button>
+</form>
 {% endblock %}

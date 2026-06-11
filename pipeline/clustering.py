@@ -1,11 +1,12 @@
 import json
 
 from pipeline.dev_client import get_anthropic_client
+from pipeline.topic import DEFAULT_TOPIC
 
 _MODEL = "claude-haiku-4-5-20251001"
 
-_SYSTEM = """\
-You are a data engineering content curator. Group the provided articles into
+_SYSTEM_TAIL = """\
+ Group the provided articles into
 exactly 2 thematic batches.
 Each batch needs a concise title and must contain at least one URL.
 Every article URL must appear in exactly one batch.
@@ -16,7 +17,11 @@ Return ONLY a JSON object with no commentary, no markdown fences:
 """
 
 
-async def cluster(articles: list[dict]) -> dict:
+def build_system(topic: dict) -> str:
+    return f"You are a {topic['name']} content curator.{_SYSTEM_TAIL}"
+
+
+async def cluster(articles: list[dict], *, topic: dict = DEFAULT_TOPIC) -> dict:
     if len(articles) < 2:
         raise ValueError(
             f"cluster() requires at least 2 articles to form two non-empty batches,"
@@ -30,7 +35,7 @@ async def cluster(articles: list[dict]) -> dict:
     response = await client.messages.create(
         model=_MODEL,
         max_tokens=1024,
-        system=_SYSTEM,
+        system=build_system(topic),
         messages=[{"role": "user", "content": user_msg}],
     )
 

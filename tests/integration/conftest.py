@@ -15,9 +15,6 @@ def _load_dotenv() -> None:
             os.environ.setdefault(key.strip(), val.strip())
 
 
-_load_dotenv()
-
-
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--integration",
@@ -25,6 +22,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Run integration tests against a live Docker Compose stack",
     )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    if config.getoption("--integration"):
+        _load_dotenv()
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:

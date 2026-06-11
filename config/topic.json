@@ -1,0 +1,13 @@
+{
+  "name": "Data Engineering",
+  "short_name": "DE Daily",
+  "feed_title": "DE Daily",
+  "hn_query": "data engineering",
+  "ranking_criteria": [
+    "Practical/technical depth (not opinion fluff)",
+    "Relevance to Snowflake, dbt, Spark, Databricks, Kafka, pipeline architecture, data quality, orchestration",
+    "Novelty: new releases, new techniques, not rehashed basics",
+    "Source credibility"
+  ],
+  "generation_instructions": "Practical data engineering techniques."
+}

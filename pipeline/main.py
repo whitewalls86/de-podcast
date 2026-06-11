@@ -17,6 +17,8 @@ app.state.sources_path = Path("sources.json")
 app.state.last_run_path = Path("data/last_run.json")
 app.state.feedback_path = DEFAULT_FEEDBACK
 app.state.seen_urls_path = Path("data/seen_urls.json")
+app.state.topic_path = Path("topic.json")
+app.state.pinned_path = Path("data/pinned_urls.json")
 
 app.include_router(admin_router)
 
@@ -70,7 +72,9 @@ async def feedback_vote(
     return _VOTE_HTML.format(emoji=emoji, title=escape(title or episode_id))
 
 
-async def _mock_generate(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
+async def _mock_generate(
+    batch_key: str, title: str, urls: list[str], topic: dict
+) -> tuple[str, list[str]]:
     import tempfile
 
     path = tempfile.mktemp(suffix=".mp3", prefix=f"{batch_key}_")
@@ -90,6 +94,8 @@ async def pipeline_run(request: Request):
     )
     result = await run_pipeline(
         feedback_path=request.app.state.feedback_path,
+        topic_path=request.app.state.topic_path,
+        pinned_path=request.app.state.pinned_path,
         generate_fn=generate_fn,
     )
     if result["status"] == "failed":

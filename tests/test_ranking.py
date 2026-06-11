@@ -24,10 +24,8 @@ def mock_client(text: str):
     content_block.text = text
     response = MagicMock()
     response.content = [content_block]
-    messages = AsyncMock()
-    messages.create = AsyncMock(return_value=response)
     client = MagicMock()
-    client.messages = messages
+    client.messages.create = AsyncMock(return_value=response)
     return client
 
 
@@ -235,6 +233,36 @@ async def test_score_as_bool_raises(monkeypatch):
     ):
         with pytest.raises(ValueError, match="'score' must be a float in"):
             await rank(articles)
+
+
+# --- build_system ---
+
+from pipeline.ranking import build_system  # noqa: E402
+
+
+def test_build_system_includes_topic_name():
+    topic = {"name": "World Events", "ranking_criteria": ["Breaking news"]}
+    result = build_system(topic)
+    assert "World Events" in result
+
+
+def test_build_system_includes_all_criteria():
+    topic = {"name": "Cars", "ranking_criteria": ["Safety data", "Performance specs"]}
+    result = build_system(topic)
+    assert "Safety data" in result
+    assert "Performance specs" in result
+
+
+async def test_rank_passes_topic_to_system_prompt(monkeypatch):
+    articles = make_articles(2)
+    scores = [{"url": a["url"], "score": 0.9, "reason": "ok"} for a in articles]
+    client = mock_client(json.dumps(scores))
+    topic = {"name": "New Car", "ranking_criteria": ["Fuel efficiency"]}
+    with patch("pipeline.ranking.get_anthropic_client", return_value=client):
+        await rank(articles, topic=topic)
+    call_kwargs = client.messages.create.call_args.kwargs
+    assert "New Car" in call_kwargs["system"]
+    assert "Fuel efficiency" in call_kwargs["system"]
 
 
 # --- build_ranking_prompt ---
