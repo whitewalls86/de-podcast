@@ -19,6 +19,7 @@ MAX_EPISODES = 30
 FEED_TOKEN = os.environ.get("FEED_TOKEN", "")
 FEED_HOST = os.environ.get("FEED_HOST", "http://localhost:8000")
 FEED_TITLE = os.environ.get("FEED_TITLE", "DE Daily")
+PIPELINE_HOST = os.environ.get("PIPELINE_HOST", "http://localhost:8001")
 
 security = HTTPBearer()
 
@@ -112,7 +113,7 @@ def add_episode(
     if episode_id:
         vote_title = quote(title, safe="")
         vote_tags = quote(tags, safe="")
-        vote_base = f"{FEED_HOST}/feedback/{episode_id}"
+        vote_base = f"{PIPELINE_HOST}/feedback/{episode_id}"
         description = (
             description + f"\n\n---\nWas this episode useful?\n"
             f"👍 Yes: {vote_base}?vote=up&title={vote_title}&tags={vote_tags}\n"
