@@ -17,8 +17,8 @@ _CLUSTERS = {
 }
 
 
-async def _fake_generate(batch_key: str, title: str, urls: list[str]) -> str:
-    return f"data/{batch_key}.mp3"
+async def _fake_generate(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
+    return f"data/{batch_key}.mp3", urls
 
 
 def _patch_stages(articles=_ARTICLES, ranked=_RANKED, clusters=_CLUSTERS):
@@ -100,6 +100,33 @@ async def test_seen_urls_written_on_success(tmp_path):
     assert written == {"http://example.com/a", "http://example.com/b", "http://example.com/c"}
 
 
+async def test_only_consumed_urls_written_to_seen(tmp_path):
+    # If generate_fn only consumed a subset of URLs (e.g. one source was skipped),
+    # only those consumed URLs should be marked seen — not the full batch list.
+    sources = tmp_path / "sources.json"
+    sources.write_text("[]")
+    seen = tmp_path / "seen_urls.json"
+
+    async def partial_consume(batch_key, title, urls):
+        # Simulate one URL being skipped (not added to NotebookLM)
+        return f"data/{batch_key}.mp3", urls[:1]
+
+    patches = _patch_stages()
+    for p in patches:
+        p.start()
+    try:
+        await run_pipeline(sources_path=sources, seen_path=seen, generate_fn=partial_consume)
+    finally:
+        for p in patches:
+            p.stop()
+
+    written = set(json.loads(seen.read_text()))
+    # batch_a consumed only url[0], batch_b consumed only url[0]
+    assert "http://example.com/a" in written
+    assert "http://example.com/b" not in written  # skipped — should be retried
+    assert "http://example.com/c" in written
+
+
 async def test_seen_urls_not_written_on_generation_failure(tmp_path):
     sources = tmp_path / "sources.json"
     sources.write_text("[]")
@@ -130,7 +157,7 @@ async def test_partial_failure_does_not_block_other_batch(tmp_path):
     async def fail_batch_a(batch_key, title, urls):
         if batch_key == "batch_a":
             raise RuntimeError("batch_a failed")
-        return f"data/{batch_key}.mp3"
+        return f"data/{batch_key}.mp3", urls
 
     patches = _patch_stages()
     for p in patches:

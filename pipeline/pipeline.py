@@ -20,7 +20,7 @@ _DEFAULT_SOURCES = Path("sources.json")
 _DEFAULT_SEEN = Path("data/seen_urls.json")
 _DEFAULT_LAST_RUN = Path("data/last_run.json")
 
-GenerateFn = Callable[[str, str, list[str]], Awaitable[str]]
+GenerateFn = Callable[[str, str, list[str]], Awaitable[tuple[str, list[str]]]]
 
 
 async def _post_to_feed(
@@ -127,6 +127,14 @@ async def run_pipeline(
 
     clusters = await cluster(ranked)
 
+    _raw_mb = os.environ.get("MAX_BATCHES", "0")
+    try:
+        max_batches = max(0, int(_raw_mb))
+    except ValueError:
+        raise ValueError(f"MAX_BATCHES must be an integer, got: {_raw_mb!r}") from None
+    if max_batches:
+        clusters = dict(list(clusters.items())[:max_batches])
+
     # Build a URL → tags lookup from ranked articles so each batch inherits
     # the union of its constituent articles' topic tags.
     url_tags: dict[str, list[str]] = {a["url"]: a.get("topic_tags", []) for a in ranked}
@@ -136,9 +144,9 @@ async def run_pipeline(
     seen_to_add: set[str] = set()
     for batch_key, batch in clusters.items():
         try:
-            mp3_path = await generate_fn(batch_key, batch["title"], batch["urls"])
+            mp3_path, consumed_urls = await generate_fn(batch_key, batch["title"], batch["urls"])
             episode_id = f"{_slugify(batch['title'])}-{today_utc}"
-            batch_tags = sorted({t for url in batch["urls"] for t in url_tags.get(url, [])})
+            batch_tags = sorted({t for url in consumed_urls for t in url_tags.get(url, [])})
             await _post_to_feed(
                 mp3_path=mp3_path,
                 title=batch["title"],
@@ -146,7 +154,7 @@ async def run_pipeline(
                 topic_tags=batch_tags,
             )
             batches.append({"title": batch["title"], "mp3": mp3_path, "episode_id": episode_id})
-            seen_to_add.update(batch["urls"])
+            seen_to_add.update(consumed_urls)
         except Exception:
             logger.exception(
                 "Episode generation failed for batch %s (%s)", batch_key, batch["title"]

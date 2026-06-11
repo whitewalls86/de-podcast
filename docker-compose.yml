@@ -16,6 +16,9 @@ services:
       - FEED_TOKEN=${FEED_TOKEN}
       - FEED_URL=http://feed:8000
       - FEED_HOST=http://${HOST_LAN_IP}:8000
+      - USE_DEV_CLIENT=${USE_DEV_CLIENT:-false}
+      - USE_MOCK_GENERATE=${USE_MOCK_GENERATE:-false}
+      - MAX_BATCHES=${MAX_BATCHES:-0}
     depends_on:
       - feed
 

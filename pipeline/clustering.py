@@ -9,12 +9,10 @@ You are a data engineering content curator. Group the provided articles into
 exactly 2 thematic batches.
 Each batch needs a concise title and must contain at least one URL.
 Every article URL must appear in exactly one batch.
+Copy URLs character-for-character from the input — do not modify, correct, or normalize them.
 
-Return ONLY a JSON object, no commentary:
-{
-  "batch_a": {"title": "...", "urls": ["...", ...]},
-  "batch_b": {"title": "...", "urls": ["...", ...]}
-}
+Return ONLY a JSON object with no commentary, no markdown fences:
+{"batch_a":{"title":"...","urls":["..."]},"batch_b":{"title":"...","urls":["..."]}}
 """
 
 
@@ -36,7 +34,12 @@ async def cluster(articles: list[dict]) -> dict:
         messages=[{"role": "user", "content": user_msg}],
     )
 
-    raw = response.content[0].text
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        end = raw.rfind("```")
+        if end != -1:
+            raw = raw[:end].strip()
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as e:
@@ -47,7 +50,27 @@ async def cluster(articles: list[dict]) -> dict:
             f"Claude clustering response must be a JSON object,"
             f" got {type(result).__name__}: {raw!r}"
         )
-    _validate_clusters(result, {a["url"] for a in articles})
+
+    # Remap any URLs Claude normalized (e.g. _ → -) back to the canonical input URLs.
+    # Only remap when the normalized key is unambiguous (maps to exactly one input URL).
+    input_urls = {a["url"] for a in articles}
+    norm_counts: dict[str, int] = {}
+    for u in input_urls:
+        key = u.lower().replace("-", "_")
+        norm_counts[key] = norm_counts.get(key, 0) + 1
+    norm_to_canonical = {
+        u.lower().replace("-", "_"): u
+        for u in input_urls
+        if norm_counts[u.lower().replace("-", "_")] == 1
+    }
+    for batch in result.values():
+        if isinstance(batch, dict) and isinstance(batch.get("urls"), list):
+            batch["urls"] = [
+                norm_to_canonical.get(u.lower().replace("-", "_"), u) if isinstance(u, str) else u
+                for u in batch["urls"]
+            ]
+
+    _validate_clusters(result, input_urls)
     return result
 
 

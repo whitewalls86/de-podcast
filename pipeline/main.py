@@ -70,9 +70,28 @@ async def feedback_vote(
     return _VOTE_HTML.format(emoji=emoji, title=escape(title or episode_id))
 
 
+async def _mock_generate(batch_key: str, title: str, urls: list[str]) -> tuple[str, list[str]]:
+    import tempfile
+
+    path = tempfile.mktemp(suffix=".mp3", prefix=f"{batch_key}_")
+    # Minimal valid-ish MP3 header so the feed service accepts audio/mpeg
+    with open(path, "wb") as f:
+        f.write(b"\xff\xfb\x90\x00" + b"\x00" * 128)
+    logger.info("Mock generate: wrote fake MP3 to %s for '%s'", path, title)
+    return path, urls
+
+
 @app.post("/pipeline/run")
 async def pipeline_run(request: Request):
-    result = await run_pipeline(feedback_path=request.app.state.feedback_path)
+    import os
+
+    generate_fn = (
+        _mock_generate if os.environ.get("USE_MOCK_GENERATE", "").lower() == "true" else None
+    )
+    result = await run_pipeline(
+        feedback_path=request.app.state.feedback_path,
+        generate_fn=generate_fn,
+    )
     if result["status"] == "failed":
         raise HTTPException(status_code=500, detail=result)
     return result

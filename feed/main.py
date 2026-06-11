@@ -115,9 +115,9 @@ def add_episode(
         vote_tags = quote(tags, safe="")
         vote_base = f"{PIPELINE_HOST}/feedback/{episode_id}"
         description = (
-            description + f"\n\n---\nWas this episode useful?\n"
-            f"👍 Yes: {vote_base}?vote=up&title={vote_title}&tags={vote_tags}\n"
-            f"👎 No: {vote_base}?vote=down&title={vote_title}&tags={vote_tags}"
+            description + f"<br><br>Was this episode useful? "
+            f'<a href="{vote_base}?vote=up&title={vote_title}&tags={vote_tags}">👍 Yes</a> | '
+            f'<a href="{vote_base}?vote=down&title={vote_title}&tags={vote_tags}">👎 No</a>'
         )
 
     filename = safe_filename(file.filename)

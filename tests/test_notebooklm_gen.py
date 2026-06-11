@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pipeline.notebooklm_gen import generate_episode
+from pipeline.notebooklm_gen import ArtifactInProgressTimeoutError, generate_episode
 
 _URLS = ["http://example.com/a", "http://example.com/b"]
 
@@ -98,6 +98,27 @@ async def test_timeout_raises_timeout_error(episodes_dir):
                 await generate_episode("batch_a", "Streaming", _URLS)
 
 
+async def test_artifact_timeout_is_not_retried(episodes_dir):
+    # ArtifactInProgressTimeoutError means generation started but timed out —
+    # retrying would burn another daily credit, so it should propagate immediately.
+    client, _ = _make_client()
+    client.artifacts.generate_audio = AsyncMock(side_effect=ArtifactInProgressTimeoutError())
+    with _patch_client(client):
+        with pytest.raises(ArtifactInProgressTimeoutError):
+            await generate_episode("batch_a", "Streaming", _URLS)
+    assert client.notebooks.create.await_count == 1  # no retry
+
+
+async def test_asyncio_timeout_is_not_retried(episodes_dir):
+    # asyncio.TimeoutError from the outer wait_for watchdog should also not retry.
+    client, _ = _make_client()
+    with _patch_client(client):
+        with patch("pipeline.notebooklm_gen.asyncio.wait_for", side_effect=TimeoutError()):
+            with pytest.raises(TimeoutError):
+                await generate_episode("batch_a", "Streaming", _URLS)
+    assert client.notebooks.create.await_count == 1  # no retry
+
+
 async def test_retry_first_attempt_fails_second_succeeds(episodes_dir):
     client, nb = _make_client()
     second_status = MagicMock()
@@ -106,9 +127,9 @@ async def test_retry_first_attempt_fails_second_succeeds(episodes_dir):
         side_effect=[RuntimeError("transient"), second_status]
     )
     with _patch_client(client):
-        result = await generate_episode("batch_a", "Streaming", _URLS)
+        mp3_path, consumed = await generate_episode("batch_a", "Streaming", _URLS)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    assert result.endswith(f"batch_a-{today}.mp3")
+    assert mp3_path.endswith(f"batch_a-{today}.mp3")
     assert client.notebooks.create.await_count == 2
 
 
@@ -116,13 +137,13 @@ async def test_episodes_dir_is_configurable(tmp_path, monkeypatch):
     monkeypatch.setenv("EPISODES_DIR", str(tmp_path))
     client, _ = _make_client()
     with _patch_client(client):
-        result = await generate_episode("batch_a", "Streaming", _URLS)
-    assert result.startswith(str(tmp_path))
+        mp3_path, consumed = await generate_episode("batch_a", "Streaming", _URLS)
+    assert mp3_path.startswith(str(tmp_path))
 
 
 async def test_returned_path_includes_batch_key_and_date(episodes_dir):
     client, _ = _make_client()
     with _patch_client(client):
-        result = await generate_episode("batch_xyz", "Streaming", _URLS)
+        mp3_path, consumed = await generate_episode("batch_xyz", "Streaming", _URLS)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
-    assert result.endswith(f"batch_xyz-{today}.mp3")
+    assert mp3_path.endswith(f"batch_xyz-{today}.mp3")

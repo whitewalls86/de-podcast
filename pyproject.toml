@@ -12,3 +12,6 @@ select = ["E", "F", "I", "UP"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: live Docker Compose stack required (pass --integration to run)",
+]

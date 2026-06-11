@@ -118,11 +118,38 @@ async def test_sorted_descending(monkeypatch):
     assert output_scores == sorted(output_scores, reverse=True)
 
 
+async def test_fenced_json_is_parsed(monkeypatch):
+    articles = make_articles(2)
+    scores = [{"url": a["url"], "score": 0.9, "reason": "ok"} for a in articles]
+    fenced = f"```json\n{json.dumps(scores)}\n```"
+    with patch("pipeline.ranking.get_anthropic_client", return_value=mock_client(fenced)):
+        result = await rank(articles)
+    assert len(result) == 2
+
+
+async def test_fenced_json_with_trailing_newline_is_parsed(monkeypatch):
+    articles = make_articles(2)
+    scores = [{"url": a["url"], "score": 0.9, "reason": "ok"} for a in articles]
+    fenced = f"```json\n{json.dumps(scores)}\n```\n"
+    with patch("pipeline.ranking.get_anthropic_client", return_value=mock_client(fenced)):
+        result = await rank(articles)
+    assert len(result) == 2
+
+
 async def test_invalid_json_raises(monkeypatch):
     articles = make_articles(2)
     with patch(
         "pipeline.ranking.get_anthropic_client", return_value=mock_client("not valid json {{")
     ):
+        with pytest.raises(ValueError, match="invalid JSON"):
+            await rank(articles)
+
+
+async def test_truncated_fenced_json_raises_clearly(monkeypatch):
+    # Simulates Anthropic truncating mid-response (no closing fence, incomplete JSON)
+    articles = make_articles(2)
+    truncated = '```json\n[{"url": "http://example.com/0", "score": 0.9'
+    with patch("pipeline.ranking.get_anthropic_client", return_value=mock_client(truncated)):
         with pytest.raises(ValueError, match="invalid JSON"):
             await rank(articles)
 

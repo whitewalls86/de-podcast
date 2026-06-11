@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [master, implementation]
+  pull_request:
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Run unit tests
+        run: pytest --ignore=tests/integration -v
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Create .env
+        run: |
+          cat > .env <<'EOF'
+          FEED_TOKEN=ci-test-token
+          HOST_LAN_IP=localhost
+          N8N_USER=admin
+          N8N_PASSWORD=ci-test-password
+          ANTHROPIC_API_KEY=not-used-in-ci
+          EOF
+
+      - name: Build and start stack
+        run: docker compose --profile pipeline up -d --build
+
+      - name: Wait for feed and pipeline to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health && curl -sf http://localhost:8001/health; then
+              echo "Services ready after $i attempts"
+              exit 0
+            fi
+            echo "Attempt $i/30 — not yet ready"
+            sleep 3
+          done
+          echo "Services did not become healthy in time" && exit 1
+
+      - name: Wait for n8n to be reachable
+        run: |
+          for i in $(seq 1 20); do
+            status=$(curl -o /dev/null -sw "%{http_code}" http://localhost:5678 || echo 000)
+            if [ "$status" != "000" ]; then
+              echo "n8n reachable (HTTP $status) after $i attempts"
+              exit 0
+            fi
+            echo "Attempt $i/20 — n8n not yet up"
+            sleep 3
+          done
+          echo "n8n did not become reachable in time" && exit 1
+
+      - name: Run integration tests
+        env:
+          FEED_TOKEN: ci-test-token
+        run: pytest tests/integration/ --integration -v
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose --profile pipeline logs
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose --profile pipeline down -v
