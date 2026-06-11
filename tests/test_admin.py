@@ -94,6 +94,16 @@ def test_delete_source(client, admin_paths):
     )
 
 
+def test_delete_source_missing_returns_404(client):
+    r = client.delete("/admin/sources/nonexistent")
+    assert r.status_code == 404
+
+
+def test_toggle_source_missing_returns_404(client):
+    r = client.patch("/admin/sources/nonexistent")
+    assert r.status_code == 404
+
+
 def test_feedback_page(client):
     r = client.get("/admin/feedback")
     assert r.status_code == 200

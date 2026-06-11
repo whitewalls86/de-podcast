@@ -13,6 +13,9 @@ pipeline/episodes/
 feed/episodes/
 *.mp3
 
+# Runtime state (seen URLs, last run metadata)
+data/
+
 # NotebookLM auth
 notebooklm_auth/
 

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -47,12 +47,18 @@ async def add_source_route(
 
 @router.delete("/sources/{id}", status_code=204)
 async def delete_source_route(id: str, request: Request):
-    remove_source(id, path=request.app.state.sources_path)
+    try:
+        remove_source(id, path=request.app.state.sources_path)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Source {id!r} not found")
 
 
 @router.patch("/sources/{id}")
 async def toggle_source_route(id: str, request: Request):
-    source = toggle_source(id, path=request.app.state.sources_path)
+    try:
+        source = toggle_source(id, path=request.app.state.sources_path)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Source {id!r} not found")
     return JSONResponse(source)
 
 
