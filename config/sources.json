@@ -1,10 +1,10 @@
 [
-  {"name": "Towards Data Science", "url": "https://towardsdatascience.com/feed", "type": "rss", "active": true},
+  {"name": "Towards Data Science", "url": "https://towardsdatascience.com/feed", "type": "rss", "active": false},
   {"name": "dbt Blog", "url": "https://www.getdbt.com/blog/rss", "type": "rss", "active": true},
   {"name": "Locally Optimistic", "url": "https://locallyoptimistic.com/feed.xml", "type": "rss", "active": true},
   {"name": "Datafold Blog", "url": "https://www.datafold.com/blog/rss.xml", "type": "rss", "active": true},
   {"name": "DataEngineer.io", "url": "https://dataengineer.io/rss", "type": "rss", "active": true},
-  {"name": "Medium DE tag", "url": "https://medium.com/feed/tag/data-engineering", "type": "rss", "active": true},
+  {"name": "Medium DE tag", "url": "https://medium.com/feed/tag/data-engineering", "type": "rss", "active": false},
   {"name": "Hacker News", "url": "https://hn.algolia.com/api/v1/search_by_date", "type": "hn", "active": true},
   {"name": "r/dataengineering", "url": "https://www.reddit.com/r/dataengineering/top/.rss?t=day", "type": "rss", "active": true}
 ]

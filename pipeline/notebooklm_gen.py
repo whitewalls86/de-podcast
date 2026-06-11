@@ -23,8 +23,15 @@ async def _generate_once(title: str, urls: list[str], dest: Path) -> str:
     async with NotebookLMClient.from_storage() as client:
         nb = await client.notebooks.create(f"DE Daily - {title}")
         try:
+            added = 0
             for url in urls:
-                await client.sources.add_url(nb.id, url, wait=True)
+                try:
+                    await client.sources.add_url(nb.id, url, wait=True)
+                    added += 1
+                except Exception as url_exc:  # noqa: BLE001
+                    logger.warning("Skipping unaddable source %s: %s", url, url_exc)
+            if added == 0:
+                raise RuntimeError("No sources could be added to the notebook")
             status = await client.artifacts.generate_audio(
                 nb.id,
                 instructions=f"Practical data engineering techniques. Topic: {title}",

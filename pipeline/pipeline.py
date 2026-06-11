@@ -127,6 +127,9 @@ async def run_pipeline(
 
     clusters = await cluster(ranked)
 
+    max_batches = int(os.environ.get("MAX_BATCHES", "0")) or len(clusters)
+    clusters = dict(list(clusters.items())[:max_batches])
+
     # Build a URL → tags lookup from ranked articles so each batch inherits
     # the union of its constituent articles' topic tags.
     url_tags: dict[str, list[str]] = {a["url"]: a.get("topic_tags", []) for a in ranked}
