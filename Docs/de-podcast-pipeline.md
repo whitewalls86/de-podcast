@@ -342,7 +342,8 @@ async def generate_episode(
         except Exception:
             pass  # logged; domain recorded if rpc_code == 9
     if not consumed:
-        raise NoSourcesAddedError(...)  # no retry — all sources deterministically rejected
+        # raises NoSourcesAddedError (no retry) only when all failures were rpc_code==9;
+        # raises retryable RuntimeError if any failure was transient or urls was empty
     audio = await notebook.generate_audio_overview(
         focus=f"{topic['generation_instructions']} Topic: {title}"
     )
