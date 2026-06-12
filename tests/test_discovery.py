@@ -313,6 +313,17 @@ async def test_all_inactive_returns_empty(tmp_path):
 # --- blocked domains ---
 
 
+async def test_malformed_blocked_domains_file_treated_as_empty(tmp_path):
+    blocked_path = tmp_path / "blocked_domains.json"
+    blocked_path.write_text("not valid json {{{")
+    p = write_sources(tmp_path, [RSS_SOURCE])
+    entry = rss_entry("Should Appear", "http://medium.com/article", RECENT)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
+            articles = await discover(p, hn_query="test", blocked_domains_path=blocked_path)
+    assert len(articles) == 1  # malformed file → no filtering
+
+
 async def test_blocked_domain_filtered_out(tmp_path):
     blocked_path = tmp_path / "blocked_domains.json"
     blocked_path.write_text(json.dumps(["medium.com"]))

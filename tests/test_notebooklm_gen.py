@@ -217,6 +217,33 @@ async def test_mixed_rpc9_and_transient_raises_runtime_and_retries(episodes_dir,
     assert client.notebooks.create.await_count == 2  # retried
 
 
+async def test_rpc9_creates_parent_directory_if_missing(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=_rpc9_exc())
+    # nested path whose parents don't exist yet
+    blocked_path = tmp_path / "nested" / "data" / "blocked_domains.json"
+    with _patch_client(client):
+        with pytest.raises(NoSourcesAddedError):
+            await generate_episode(
+                "batch_a", "Streaming", _URLS, _TOPIC, blocked_domains_path=blocked_path
+            )
+    assert blocked_path.exists()
+
+
+async def test_rpc9_skips_recording_when_blocked_file_malformed(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=_rpc9_exc())
+    blocked_path = tmp_path / "blocked_domains.json"
+    blocked_path.write_text("not valid json {{{")
+    original_content = blocked_path.read_text()
+    with _patch_client(client):
+        with pytest.raises(NoSourcesAddedError):
+            await generate_episode(
+                "batch_a", "Streaming", _URLS, _TOPIC, blocked_domains_path=blocked_path
+            )
+    assert blocked_path.read_text() == original_content  # file not overwritten
+
+
 async def test_partial_rpc9_failure_records_domain_but_succeeds(episodes_dir, tmp_path):
     client, _ = _make_client()
     client.sources.add_url = AsyncMock(side_effect=[_rpc9_exc(), None])

@@ -52,6 +52,7 @@ def _record_blocked_domain(url: str, path: Path) -> None:
             existing = []
         if domain not in existing:
             existing.append(domain)
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(existing))
     except Exception:  # noqa: BLE001
         pass
