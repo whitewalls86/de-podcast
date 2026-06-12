@@ -56,6 +56,7 @@ services:
       - pipeline_data:/app/data                   # seen_urls.json + feedback.json
       - notebooklm_auth:/root/.notebooklm
       - ./config/sources.json:/app/sources.json   # source list (bind mount — editable)
+      - ./config/topic.json:/app/topic.json       # topic config (bind mount — editable)
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FEED_TOKEN=${FEED_TOKEN}
@@ -171,6 +172,10 @@ Pulls from the following sources in parallel. Active source list is read from `s
 
 TDS and Medium are disabled by default — their articles are paywalled, so NotebookLM can't fetch the full content.
 
+The HN query string comes from `topic.json`'s `hn_query` field, so changing the topic automatically re-targets the HN search.
+
+After collecting articles, `discover()` loads `data/blocked_domains.json` (if it exists) and filters out any article whose domain — or parent domain — appears in the blocklist. This list grows automatically when NotebookLM deterministically rejects a source; it can also be hand-edited to remove false positives.
+
 **Output:** List of article dicts: `{title, url, source, published_at, snippet}`
 
 **Dedup:** URL-based dedup across sources. Filter out anything older than 48 hours.
@@ -181,7 +186,7 @@ TDS and Medium are disabled by default — their articles are paywalled, so Note
 
 Single Claude Haiku call. Pass all article titles + snippets, return JSON ranked list.
 
-**Ranking criteria (system prompt):**
+**Ranking criteria** are read from `topic.json`'s `ranking_criteria` array and injected into the Claude system prompt at runtime — changing the topic changes what gets scored highly without touching code. The defaults for a DE-focused topic are:
 - Practical/technical depth (not opinion fluff)
 - Relevance: Snowflake, dbt, Spark, Databricks, Kafka, pipeline architecture, data quality, orchestration
 - Novelty: new releases, new techniques, not rehashed basics
@@ -321,22 +326,41 @@ Was this episode useful?
 Uses `notebooklm-py`. For each batch, runs the full ephemeral notebook lifecycle:
 
 ```python
-async def generate_episode(batch: dict) -> Path:
+async def generate_episode(
+    batch_key: str, title: str, urls: list[str], topic: dict
+) -> tuple[str, list[str]]:
+    # Returns (mp3_path, consumed_urls).
+    # consumed_urls = URLs NotebookLM accepted; rejected URLs are excluded so
+    # the pipeline can leave them unmarked in seen_urls.json for retry.
     client = NotebookLMClient()
-    notebook = await client.notebooks.create(name=f"DE Daily - {batch['title']}")
-    for url in batch['urls']:
-        await notebook.sources.add_url(url)
+    notebook = await client.notebooks.create(name=f"{topic['short_name']} - {title}")
+    consumed, deterministic_failures, transient_failures = [], [], []
+    for url in urls:
+        try:
+            await notebook.sources.add_url(url)
+            consumed.append(url)
+        except Exception as exc:
+            if getattr(exc, "rpc_code", None) == 9:
+                deterministic_failures.append(url)  # domain recorded to blocked_domains.json
+            else:
+                transient_failures.append(url)
+    if not consumed:
+        if deterministic_failures and not transient_failures:
+            raise NoSourcesAddedError(...)   # no retry — all sources deterministically rejected
+        raise RuntimeError("No sources could be added to the notebook")  # retryable
     audio = await notebook.generate_audio_overview(
-        focus=f"Practical data engineering techniques. Topic: {batch['title']}"
+        focus=f"{topic['generation_instructions']} Topic: {title}"
     )
-    mp3_path = await audio.download(dest=EPISODES_DIR / f"{slugify(batch['title'])}-{today}.mp3")
+    mp3_path = await audio.download(dest=EPISODES_DIR / f"{batch_key}-{today}.mp3")
     await notebook.delete()
-    return mp3_path
+    return mp3_path, consumed
 ```
 
 **Error handling:**
 - Auth failure → surface in admin UI, skip episode, do not crash pipeline
-- Generation timeout (>15 min) → retry once, then skip with logged error
+- Generation timeout (>15 min) → **not retried**; `ArtifactInProgressTimeoutError` and `asyncio.TimeoutError` propagate immediately because generation has already started and retrying would consume another daily NotebookLM credit
+- All sources deterministically rejected (`rpc_code=9`) → raises `NoSourcesAddedError`, also not retried; domains are recorded in `data/blocked_domains.json`
+- Transient failures (network errors, other exceptions) → retried once
 - One batch failing never blocks the other
 
 **Generation time:** 3–8 min per notebook, run sequentially. Total: ~10–20 min.
@@ -370,10 +394,15 @@ Served by the pipeline container on port 8001. Simple server-rendered HTML (Fast
 **Routes:**
 ```
 GET  /admin                → dashboard
-GET  /admin/sources        → source list management
+GET  /admin/sources        → source list + pinned URL management
 POST /admin/sources        → add source
 DELETE /admin/sources/{id} → remove source
 PATCH /admin/sources/{id}  → toggle active/inactive
+POST /admin/pinned         → add pinned URL (bypasses discovery filter)
+DELETE /admin/pinned/{id}  → remove pinned URL
+GET  /admin/topic          → topic config editor
+POST /admin/topic          → save topic config
+DELETE /admin/seen-urls    → clear seen_urls.json (resets cross-run dedup)
 GET  /auth/status          → returns auth health JSON (polled by UI)
 POST /auth/refresh         → runs `notebooklm auth refresh` (headless)
 POST /auth/reauth          → starts noVNC re-auth session
@@ -438,7 +467,8 @@ de-podcast/
 ├── .env.example                  # template — committed
 ├── README.md
 ├── config/
-│   └── sources.json              # active source list (bind-mounted, committed with defaults)
+│   ├── sources.json              # active source list (bind-mounted, committed with defaults)
+│   └── topic.json                # topic config: name, hn_query, ranking_criteria, etc. (bind-mounted)
 │
 ├── pipeline/
 │   ├── Dockerfile
@@ -451,12 +481,15 @@ de-podcast/
 │   ├── dev_client.py             # subprocess-backed Claude client for local dev
 │   ├── notebooklm_gen.py
 │   ├── feedback.py               # read/write feedback.json, build few-shot context
+│   ├── topic.py                  # load/validate/save topic.json
+│   ├── pinned.py                 # load/add/remove pinned URLs
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
 │   └── templates/                # Jinja2 HTML templates
 │       ├── base.html
 │       ├── dashboard.html
 │       ├── sources.html
+│       ├── topic.html            # topic config editor
 │       └── feedback.html         # feedback history view (vote confirmation is inline HTML)
 │
 ├── feed/
