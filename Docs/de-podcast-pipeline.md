@@ -334,13 +334,16 @@ async def generate_episode(
     # the pipeline can leave them unmarked in seen_urls.json for retry.
     client = NotebookLMClient()
     notebook = await client.notebooks.create(name=f"{topic['short_name']} - {title}")
-    consumed = []
+    consumed, deterministic_failures, transient_failures = [], [], []
     for url in urls:
         try:
             await notebook.sources.add_url(url)
             consumed.append(url)
-        except Exception:
-            pass  # logged; domain recorded if rpc_code == 9
+        except Exception as exc:
+            if getattr(exc, "rpc_code", None) == 9:
+                deterministic_failures.append(url)  # domain recorded to blocked_domains.json
+            else:
+                transient_failures.append(url)
     if not consumed:
         if deterministic_failures and not transient_failures:
             raise NoSourcesAddedError(...)   # no retry — all sources deterministically rejected
