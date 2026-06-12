@@ -38,9 +38,35 @@ N8N_PASSWORD=<choose-a-password>
 
 `HOST_LAN_IP` must be your **Tailscale IP** (starts with `100.`), not your LAN IP — podcast apps on your phone use cloud fetchers that can't reach plain LAN addresses.
 
-> **Note:** `FEED_TITLE` in `.env` and `feed_title` in `config/topic.json` must be changed together. The feed service reads `FEED_TITLE` from the environment directly; it does not consume `topic.feed_title`. Changing only the topic config will leave the podcast app title stale.
+### 2. Customize the topic (optional)
 
-### 2. Open Windows Firewall for port 8000
+Edit `config/topic.json` to change what the podcast covers:
+
+```json
+{
+  "name": "Data Engineering",
+  "short_name": "DE Daily",
+  "feed_title": "DE Daily",
+  "hn_query": "data engineering",
+  "ranking_criteria": [
+    "Practical/technical depth (not opinion fluff)",
+    "Relevance to Snowflake, dbt, Spark, ..."
+  ],
+  "generation_instructions": "Practical data engineering techniques."
+}
+```
+
+- `short_name` — prefixes each NotebookLM notebook name
+- `feed_title` — display name in podcast apps (see lockstep note below)
+- `hn_query` — search term sent to the HN Algolia API
+- `ranking_criteria` — one criterion per line; drives the Claude ranking prompt
+- `generation_instructions` — prefixes the NotebookLM audio overview prompt
+
+You can also edit these fields live via the Admin UI at [http://localhost:8001/admin/topic](http://localhost:8001/admin/topic) — no container restart needed.
+
+> **Note:** `feed_title` here and `FEED_TITLE` in `.env` must be changed together. The feed service reads `FEED_TITLE` from the environment directly; it does not consume `topic.feed_title`. Changing only `topic.json` will leave the podcast app title stale.
+
+### 3. Open Windows Firewall for port 8000
 
 The feed runs on port 8000. Allow inbound TCP from the Tailscale subnet:
 
@@ -49,7 +75,7 @@ New-NetFirewallRule -DisplayName "DE Podcast Feed" -Direction Inbound `
   -Protocol TCP -LocalPort 8000 -RemoteAddress 100.64.0.0/10 -Action Allow
 ```
 
-### 3. Start the stack
+### 4. Start the stack
 
 ```
 docker compose up -d                          # feed + n8n
@@ -61,7 +87,7 @@ Wait for containers to be healthy:
 docker compose ps
 ```
 
-### 4. Re-authenticate NotebookLM
+### 5. Re-authenticate NotebookLM
 
 The first run requires a Google login via the browser-based re-auth flow:
 
@@ -73,7 +99,7 @@ The first run requires a Google login via the browser-based re-auth flow:
 
 Auth cookies are stored in a Docker named volume and persist across restarts. Re-auth is typically needed monthly.
 
-### 5. Set up n8n
+### 6. Set up n8n
 
 1. Open n8n: [http://localhost:5678](http://localhost:5678) (login with `N8N_USER` / `N8N_PASSWORD`)
 2. Create a workflow:
@@ -82,7 +108,7 @@ Auth cookies are stored in a Docker named volume and persist across restarts. Re
    - **IF** node — condition: `{{ $json.status !== "success" && $json.status !== "noop" }}`
    - **notification node** (optional) — alert on partial failure
 
-### 6. Add the feed to Apple Podcasts
+### 7. Add the feed to Apple Podcasts
 
 Use **Apple Podcasts** — not Overcast or Pocket Casts, which use cloud fetchers that can't reach Tailscale addresses.
 
@@ -90,7 +116,7 @@ Use **Apple Podcasts** — not Overcast or Pocket Casts, which use cloud fetcher
 2. Verify the feed is reachable from your phone's browser: `http://<tailscale-ip>:8000/feed.xml`
 3. In Apple Podcasts → **Listen Now** → **Follow a Show** → paste the URL
 
-### 7. Trigger a test run
+### 8. Trigger a test run
 
 From the Admin UI or via curl:
 ```

@@ -56,6 +56,7 @@ services:
       - pipeline_data:/app/data                   # seen_urls.json + feedback.json
       - notebooklm_auth:/root/.notebooklm
       - ./config/sources.json:/app/sources.json   # source list (bind mount — editable)
+      - ./config/topic.json:/app/topic.json       # topic config (bind mount — editable)
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - FEED_TOKEN=${FEED_TOKEN}
@@ -171,6 +172,10 @@ Pulls from the following sources in parallel. Active source list is read from `s
 
 TDS and Medium are disabled by default — their articles are paywalled, so NotebookLM can't fetch the full content.
 
+The HN query string comes from `topic.json`'s `hn_query` field, so changing the topic automatically re-targets the HN search.
+
+After collecting articles, `discover()` loads `data/blocked_domains.json` (if it exists) and filters out any article whose domain — or parent domain — appears in the blocklist. This list grows automatically when NotebookLM deterministically rejects a source; it can also be hand-edited to remove false positives.
+
 **Output:** List of article dicts: `{title, url, source, published_at, snippet}`
 
 **Dedup:** URL-based dedup across sources. Filter out anything older than 48 hours.
@@ -181,7 +186,7 @@ TDS and Medium are disabled by default — their articles are paywalled, so Note
 
 Single Claude Haiku call. Pass all article titles + snippets, return JSON ranked list.
 
-**Ranking criteria (system prompt):**
+**Ranking criteria** are read from `topic.json`'s `ranking_criteria` array and injected into the Claude system prompt at runtime — changing the topic changes what gets scored highly without touching code. The defaults for a DE-focused topic are:
 - Practical/technical depth (not opinion fluff)
 - Relevance: Snowflake, dbt, Spark, Databricks, Kafka, pipeline architecture, data quality, orchestration
 - Novelty: new releases, new techniques, not rehashed basics
@@ -321,13 +326,13 @@ Was this episode useful?
 Uses `notebooklm-py`. For each batch, runs the full ephemeral notebook lifecycle:
 
 ```python
-async def generate_episode(batch: dict) -> Path:
+async def generate_episode(batch: dict, topic: dict) -> Path:
     client = NotebookLMClient()
-    notebook = await client.notebooks.create(name=f"DE Daily - {batch['title']}")
+    notebook = await client.notebooks.create(name=f"{topic['short_name']} - {batch['title']}")
     for url in batch['urls']:
         await notebook.sources.add_url(url)
     audio = await notebook.generate_audio_overview(
-        focus=f"Practical data engineering techniques. Topic: {batch['title']}"
+        focus=f"{topic['generation_instructions']} Topic: {batch['title']}"
     )
     mp3_path = await audio.download(dest=EPISODES_DIR / f"{slugify(batch['title'])}-{today}.mp3")
     await notebook.delete()
@@ -370,10 +375,15 @@ Served by the pipeline container on port 8001. Simple server-rendered HTML (Fast
 **Routes:**
 ```
 GET  /admin                → dashboard
-GET  /admin/sources        → source list management
+GET  /admin/sources        → source list + pinned URL management
 POST /admin/sources        → add source
 DELETE /admin/sources/{id} → remove source
 PATCH /admin/sources/{id}  → toggle active/inactive
+POST /admin/pinned         → add pinned URL (bypasses discovery filter)
+DELETE /admin/pinned/{id}  → remove pinned URL
+GET  /admin/topic          → topic config editor
+POST /admin/topic          → save topic config
+DELETE /admin/seen-urls    → clear seen_urls.json (resets cross-run dedup)
 GET  /auth/status          → returns auth health JSON (polled by UI)
 POST /auth/refresh         → runs `notebooklm auth refresh` (headless)
 POST /auth/reauth          → starts noVNC re-auth session
@@ -438,7 +448,8 @@ de-podcast/
 ├── .env.example                  # template — committed
 ├── README.md
 ├── config/
-│   └── sources.json              # active source list (bind-mounted, committed with defaults)
+│   ├── sources.json              # active source list (bind-mounted, committed with defaults)
+│   └── topic.json                # topic config: name, hn_query, ranking_criteria, etc. (bind-mounted)
 │
 ├── pipeline/
 │   ├── Dockerfile
@@ -451,12 +462,15 @@ de-podcast/
 │   ├── dev_client.py             # subprocess-backed Claude client for local dev
 │   ├── notebooklm_gen.py
 │   ├── feedback.py               # read/write feedback.json, build few-shot context
+│   ├── topic.py                  # load/validate/save topic.json
+│   ├── pinned.py                 # load/add/remove pinned URLs
 │   ├── auth.py                   # auth check, refresh, reauth flow
 │   ├── sources.py                # source list CRUD
 │   └── templates/                # Jinja2 HTML templates
 │       ├── base.html
 │       ├── dashboard.html
 │       ├── sources.html
+│       ├── topic.html            # topic config editor
 │       └── feedback.html         # feedback history view (vote confirmation is inline HTML)
 │
 ├── feed/
