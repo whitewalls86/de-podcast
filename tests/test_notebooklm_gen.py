@@ -1,10 +1,15 @@
+import json
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pipeline.notebooklm_gen import ArtifactInProgressTimeoutError, generate_episode
+from pipeline.notebooklm_gen import (
+    ArtifactInProgressTimeoutError,
+    NoSourcesAddedError,
+    generate_episode,
+)
 
 _URLS = ["http://example.com/a", "http://example.com/b"]
 _TOPIC = {
@@ -159,3 +164,95 @@ async def test_returned_path_includes_batch_key_and_date(episodes_dir):
         mp3_path, consumed = await generate_episode("batch_xyz", "Streaming", _URLS, _TOPIC)
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     assert mp3_path.endswith(f"batch_xyz-{today}.mp3")
+
+
+def _rpc9_exc() -> Exception:
+    exc = Exception("content rejected by NotebookLM")
+    exc.rpc_code = 9  # type: ignore[attr-defined]
+    return exc
+
+
+async def test_all_rpc9_raises_no_sources_no_retry(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=_rpc9_exc())
+    blocked_path = tmp_path / "blocked_domains.json"
+    with _patch_client(client):
+        with pytest.raises(NoSourcesAddedError):
+            await generate_episode(
+                "batch_a", "Streaming", _URLS, _TOPIC, blocked_domains_path=blocked_path
+            )
+    assert client.notebooks.create.await_count == 1  # no retry
+    domains = json.loads(blocked_path.read_text())
+    assert "example.com" in domains
+
+
+async def test_all_transient_raises_runtime_and_retries(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=RuntimeError("network error"))
+    blocked_path = tmp_path / "blocked_domains.json"
+    with _patch_client(client):
+        with pytest.raises(RuntimeError) as exc_info:
+            await generate_episode(
+                "batch_a", "Streaming", _URLS, _TOPIC, blocked_domains_path=blocked_path
+            )
+    assert not isinstance(exc_info.value, NoSourcesAddedError)
+    assert client.notebooks.create.await_count == 2  # retried
+    assert not blocked_path.exists()
+
+
+async def test_mixed_rpc9_and_transient_raises_runtime_and_retries(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=[_rpc9_exc(), RuntimeError("transient")])
+    blocked_path = tmp_path / "blocked_domains.json"
+    with _patch_client(client):
+        with pytest.raises(RuntimeError) as exc_info:
+            await generate_episode(
+                "batch_a",
+                "Streaming",
+                ["http://medium.com/a", "http://example.com/b"],
+                _TOPIC,
+                blocked_domains_path=blocked_path,
+            )
+    assert not isinstance(exc_info.value, NoSourcesAddedError)
+    assert client.notebooks.create.await_count == 2  # retried
+
+
+async def test_rpc9_creates_parent_directory_if_missing(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=_rpc9_exc())
+    # nested path whose parents don't exist yet
+    blocked_path = tmp_path / "nested" / "data" / "blocked_domains.json"
+    with _patch_client(client):
+        with pytest.raises(NoSourcesAddedError):
+            await generate_episode(
+                "batch_a", "Streaming", _URLS, _TOPIC, blocked_domains_path=blocked_path
+            )
+    assert blocked_path.exists()
+
+
+async def test_rpc9_skips_recording_when_blocked_file_malformed(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=_rpc9_exc())
+    blocked_path = tmp_path / "blocked_domains.json"
+    blocked_path.write_text("not valid json {{{")
+    original_content = blocked_path.read_text()
+    with _patch_client(client):
+        with pytest.raises(NoSourcesAddedError):
+            await generate_episode(
+                "batch_a", "Streaming", _URLS, _TOPIC, blocked_domains_path=blocked_path
+            )
+    assert blocked_path.read_text() == original_content  # file not overwritten
+
+
+async def test_partial_rpc9_failure_records_domain_but_succeeds(episodes_dir, tmp_path):
+    client, _ = _make_client()
+    client.sources.add_url = AsyncMock(side_effect=[_rpc9_exc(), None])
+    blocked_path = tmp_path / "blocked_domains.json"
+    urls = ["http://medium.com/article", "http://example.com/good"]
+    with _patch_client(client):
+        mp3_path, consumed = await generate_episode(
+            "batch_a", "Streaming", urls, _TOPIC, blocked_domains_path=blocked_path
+        )
+    assert consumed == ["http://example.com/good"]
+    domains = json.loads(blocked_path.read_text())
+    assert "medium.com" in domains

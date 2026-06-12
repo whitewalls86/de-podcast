@@ -1,8 +1,10 @@
 import asyncio
 import calendar
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 import feedparser
 import httpx
@@ -11,6 +13,8 @@ from dateutil import parser as dateutil_parser
 _HN_BASE_PARAMS = {"tags": "story", "hitsPerPage": "30"}
 _RSS_TIMEOUT = 15
 _SNIPPET_MAX = 300
+
+logger = logging.getLogger(__name__)
 
 
 def _cutoff() -> datetime:
@@ -27,6 +31,16 @@ def _snippet(text: str | None) -> str:
     if not text:
         return ""
     return text[:_SNIPPET_MAX]
+
+
+def _normalized_domain(url: str) -> str | None:
+    hostname = urlparse(url).hostname
+    if not hostname:
+        return None
+    domain = hostname.lower()
+    if domain.startswith("www."):
+        domain = domain[4:]
+    return domain or None
 
 
 async def _fetch_rss(source: dict) -> list[dict]:
@@ -100,7 +114,19 @@ async def _fetch_hn(source: dict, *, hn_query: str) -> list[dict]:
     return results
 
 
-async def discover(sources_path: Path, *, hn_query: str) -> list[dict]:
+async def discover(
+    sources_path: Path,
+    *,
+    hn_query: str,
+    blocked_domains_path: Path = Path("data/blocked_domains.json"),
+) -> list[dict]:
+    blocked: set[str] = set()
+    if blocked_domains_path.exists():
+        try:
+            blocked = set(json.loads(blocked_domains_path.read_text()))
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("blocked_domains.json is malformed; treating as empty")
+
     sources = json.loads(sources_path.read_text())
     active = [s for s in sources if s.get("active", True)]
 
@@ -123,4 +149,13 @@ async def discover(sources_path: Path, *, hn_query: str) -> list[dict]:
             if url not in seen and article["published_at"] >= cutoff:
                 seen[url] = article
 
-    return list(seen.values())
+    if not blocked:
+        return list(seen.values())
+
+    def _is_blocked(url: str) -> bool:
+        domain = _normalized_domain(url)
+        if not domain:
+            return False
+        return any(domain == b or domain.endswith("." + b) for b in blocked)
+
+    return [a for a in seen.values() if not _is_blocked(a["url"])]

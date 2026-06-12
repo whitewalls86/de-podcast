@@ -310,6 +310,42 @@ async def test_all_inactive_returns_empty(tmp_path):
 # --- failed source is skipped ---
 
 
+# --- blocked domains ---
+
+
+async def test_malformed_blocked_domains_file_treated_as_empty(tmp_path):
+    blocked_path = tmp_path / "blocked_domains.json"
+    blocked_path.write_text("not valid json {{{")
+    p = write_sources(tmp_path, [RSS_SOURCE])
+    entry = rss_entry("Should Appear", "http://medium.com/article", RECENT)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
+            articles = await discover(p, hn_query="test", blocked_domains_path=blocked_path)
+    assert len(articles) == 1  # malformed file → no filtering
+
+
+async def test_blocked_domain_filtered_out(tmp_path):
+    blocked_path = tmp_path / "blocked_domains.json"
+    blocked_path.write_text(json.dumps(["medium.com"]))
+    p = write_sources(tmp_path, [RSS_SOURCE])
+    entry = rss_entry("Paywalled", "http://medium.com/some-article", RECENT)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
+            articles = await discover(p, hn_query="test", blocked_domains_path=blocked_path)
+    assert articles == []
+
+
+async def test_blocked_domain_subdomain_filtered_out(tmp_path):
+    blocked_path = tmp_path / "blocked_domains.json"
+    blocked_path.write_text(json.dumps(["medium.com"]))
+    p = write_sources(tmp_path, [RSS_SOURCE])
+    entry = rss_entry("Paywalled Subdomain", "http://subdomain.medium.com/article", RECENT)
+    with patch("pipeline.discovery.httpx.AsyncClient", return_value=mock_rss_client()):
+        with patch("pipeline.discovery.feedparser.parse", return_value=fake_feed([entry])):
+            articles = await discover(p, hn_query="test", blocked_domains_path=blocked_path)
+    assert articles == []
+
+
 async def test_failed_source_does_not_block_others(tmp_path):
     src_a = {"name": "A", "url": "http://a.com/feed", "type": "rss", "active": True}
     src_b = {"name": "B", "url": "http://b.com/feed", "type": "rss", "active": True}
