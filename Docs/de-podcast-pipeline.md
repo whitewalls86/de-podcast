@@ -326,22 +326,36 @@ Was this episode useful?
 Uses `notebooklm-py`. For each batch, runs the full ephemeral notebook lifecycle:
 
 ```python
-async def generate_episode(batch: dict, topic: dict) -> Path:
+async def generate_episode(
+    batch_key: str, title: str, urls: list[str], topic: dict
+) -> tuple[str, list[str]]:
+    # Returns (mp3_path, consumed_urls).
+    # consumed_urls = URLs NotebookLM accepted; rejected URLs are excluded so
+    # the pipeline can leave them unmarked in seen_urls.json for retry.
     client = NotebookLMClient()
-    notebook = await client.notebooks.create(name=f"{topic['short_name']} - {batch['title']}")
-    for url in batch['urls']:
-        await notebook.sources.add_url(url)
+    notebook = await client.notebooks.create(name=f"{topic['short_name']} - {title}")
+    consumed = []
+    for url in urls:
+        try:
+            await notebook.sources.add_url(url)
+            consumed.append(url)
+        except Exception:
+            pass  # logged; domain recorded if rpc_code == 9
+    if not consumed:
+        raise NoSourcesAddedError(...)  # no retry — all sources deterministically rejected
     audio = await notebook.generate_audio_overview(
-        focus=f"{topic['generation_instructions']} Topic: {batch['title']}"
+        focus=f"{topic['generation_instructions']} Topic: {title}"
     )
-    mp3_path = await audio.download(dest=EPISODES_DIR / f"{slugify(batch['title'])}-{today}.mp3")
+    mp3_path = await audio.download(dest=EPISODES_DIR / f"{batch_key}-{today}.mp3")
     await notebook.delete()
-    return mp3_path
+    return mp3_path, consumed
 ```
 
 **Error handling:**
 - Auth failure → surface in admin UI, skip episode, do not crash pipeline
-- Generation timeout (>15 min) → retry once, then skip with logged error
+- Generation timeout (>15 min) → **not retried**; `ArtifactInProgressTimeoutError` and `asyncio.TimeoutError` propagate immediately because generation has already started and retrying would consume another daily NotebookLM credit
+- All sources deterministically rejected (`rpc_code=9`) → raises `NoSourcesAddedError`, also not retried; domains are recorded in `data/blocked_domains.json`
+- Transient failures (network errors, other exceptions) → retried once
 - One batch failing never blocks the other
 
 **Generation time:** 3–8 min per notebook, run sequentially. Total: ~10–20 min.
